@@ -1,0 +1,117 @@
+<div class="container mt-4">
+<div class="row">
+	<div class="col-md-3 col-sm-2"></div>	
+	<div class="col-md-6 col-sm-8"> 
+		<!-- jumbotron  -->
+		<div class="p-4 mb-4 bg-light rounded-3 text-center"
+		     data-bs-toggle="collapse"
+		     data-bs-target="#login"
+		     style="cursor:pointer;">		     
+			<img src="img/logo.png" width="120" class="rounded-circle"> 
+			<h4 class="titolo">Esegui il Login</h4>
+		</div>
+	</div>	
+	<div class="col-md-3 col-sm-2"></div>
+</div>
+
+<!-- LOGIN FORM -->	
+<div class="row collapse" id="login">   
+  <div class="col-md-3 col-sm-2"></div>	
+  <div class="col-md-6 col-sm-8">			
+	
+	<form #loginForm="ngForm"  novalidate>
+
+		<!-- USERNAME -->
+		<div class="form-group">				
+			<div class="input-group"
+			     [class.red]="txtUsernameCtrl.touched && txtUsernameCtrl.invalid">
+				<span class="input-group-text">
+					<i class="bi bi-person-fill fs-4"> </i>
+				</span>
+				<input type="text"
+				       class="form-control"
+				       name="username"
+				       placeholder="Username"
+				       value="pippo@gmail.com"
+					   [(ngModel)]="txtUsername"
+					   #txtUsernameCtrl="ngModel"
+					   required
+					   pattern="^[a-zA-Z]{4,20}@gmail.com$"
+					   [class.red]="txtUsernameCtrl.touched && txtUsernameCtrl.invalid">
+			</div>			
+			@if(txtUsernameCtrl.touched && txtUsernameCtrl.invalid && txtUsernameCtrl.errors?.['required']){
+				<small>
+				  Username non può essere vuoto
+				</small>
+			}
+			@if(txtUsernameCtrl.touched && txtUsernameCtrl.invalid && txtUsernameCtrl.errors?.['pattern']){
+				<small>
+				  Username deve terminate con @gmail.com
+				</small>
+			}
+		</div>
+
+		<!-- PASSWORD -->
+		<div class="form-group mt-2 mb-2">					
+			<div class="input-group" 
+			     [class.red]="txtPasswordCtrl.touched && txtPasswordCtrl.invalid">
+				<span class="input-group-text" >
+					<i class="bi bi-lock-fill fs-4">  </i>
+				</span>
+				<input  type="password"
+				        class="form-control"
+					    name="password"
+				        placeholder="Password"
+					    [(ngModel)]="txtPassword"
+					    #txtPasswordCtrl="ngModel"
+					    required
+					    [class.red]="txtPasswordCtrl.touched && txtPasswordCtrl.invalid">
+			</div>
+			@if(txtPasswordCtrl.touched && txtPasswordCtrl.invalid && txtPasswordCtrl.errors?.['required']){
+				<small>
+				  Password non può essere vuoto
+				</small>
+			}
+		</div>
+	</form>
+
+	<!-- ERRORE -->
+	@if (lblErrore) {
+		<div class="alert alert-danger alert-dismissible fade show" >				
+			<strong>Attenzione!</strong> Username o Password non validi				
+			<button type="button" class="btn-close" onclick="chiudi()">
+			</button>
+		</div>
+	}
+	<!-- PULSANTI -->
+	<div class="d-grid gap-1">				
+		<button type="button"
+				class="btn btn-secondary"
+				(click) = "controllaLogin(loginForm)">
+			LOGIN
+		</button>			
+		
+		<button type="button"
+				class="btn btn-secondary mt-2"
+				>
+			LOGIN WITH GOOGLE
+		</button>	
+		
+		<div id="googleDiv"></div>
+		
+		<button type="button"
+				class="btn btn-link mt-2 p-0">
+			registrati  
+		</button>	
+		
+		<button type="button"
+				class="btn btn-link mt-0 p-0"
+				id="btnPasswordDimenticata">
+			hai dimenticato la password?  
+		</button>											
+	</div>		 			
+  </div>		
+  <div class="col-md-3 col-sm-2"></div>
+</div>
+</div>
+	

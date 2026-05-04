@@ -1,0 +1,16 @@
+
+small {
+  color: #dc3545;          
+  font-size: 0.8rem;   
+}
+
+.red{
+	/* rosso bootsratp usato da is-invalid */
+	border:1px solid #dc3545; 
+}
+
+.icon-red{
+	color: #dc3545;  /* colore usato da is-invalid */
+	border:1px solid #dc3545; 
+	border-right:transparent;
+}
