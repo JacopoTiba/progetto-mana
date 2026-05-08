@@ -1,0 +1,15 @@
+h1{
+	text-align:center;
+	font-size:25pt;
+	font-weight:bold;
+}
+
+
+#mapContainer{
+	width:1000px;
+	height:800px;
+	margin:10px auto;		
+}
+
+
+
