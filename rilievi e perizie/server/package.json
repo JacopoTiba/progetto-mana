@@ -1,14 +1,14 @@
 {
-    "name": "nodejs",
+    "name": "rilievi-perizie-server",
     "version": "1.0.0",
-    "description": "Esercizi basati su nodejs e Express",
+    "description": "Server Express per Rilievi e Perizie",
     "keywords": [
-        "nodejs",
-        "Express",
-        "dispatching"
+        "express",
+        "perizie",
+        "cloudinary"
     ],
     "license": "ISC",
-    "author": "Lorenzo",
+    "author": "Jacopo Tibaldi",
     "type": "commonjs",
     "main": "server.js",
     "scripts": {
@@ -17,6 +17,7 @@
     },
     "dependencies": {
         "bcryptjs": "^3.0.3",
+        "cloudinary": "^2.10.0",
         "cookie-parser": "^1.4.7",
         "cors": "^2.8.5",
         "dotenv": "^17.2.3",
@@ -26,7 +27,7 @@
         "mongodb": "^6.20.0",
         "nodemailer": "^8.0.5",
         "nodemon": "^3.1.10",
-        "socket.io": "^4.8.3",
+
         "ts-node": "^10.9.2",
         "tsx": "^4.20.5",
         "typescript": "^5.9.2"

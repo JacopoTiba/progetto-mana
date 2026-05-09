@@ -39,6 +39,7 @@
     "isolatedModules": true,
     "noUncheckedSideEffectImports": true,
     "moduleDetection": "force",
+    "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true // Consente di importare un file json all'interno di un file typescript
   }

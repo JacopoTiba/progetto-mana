@@ -1,27 +1,23 @@
 //A.  Import delle librerie
 import http from "http";
-import url from "url";
 import fs from "fs";
 import express, { CookieOptions } from "express";
 import dotenv from "dotenv";
-import { Document, MongoClient, ObjectId, WithId } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 import queryStringParser from "./queryStringParser";
 import cors from "cors";
 import https from "https";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import path from "path";
 import cookieParser from "cookie-parser";
-import e from "express";
 import nodemailer from "nodemailer";
-import { Server, Socket } from "socket.io";
+import { v2 as cloudinary } from "cloudinary";
 
 // i parametri GET sono restituiti dentro req.query
 // i parametri POST sono restituiti dentro req.body
 // i parametri passati come risorsa sono restituiti dentro req.params
 
 //B.  Configurazioni
-// funzione di callback richiamata in corrispondenza di ogni richiesta al server
 const app: express.Express = express();
 dotenv.config({
   path: ".env",
@@ -31,20 +27,24 @@ const HTTPS_PORT = parseInt(process.env.HTTPS_PORT!);
 const dbName = process.env.dbName;
 const googleOAuth = JSON.parse(process.env.googleOAuth!);
 
-//C.  Creazione ed avvio del server http
-// const server = http.createServer(app);
+// Configurazione Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME!,
+  api_key: process.env.CLOUDINARY_API_KEY!,
+  api_secret: process.env.CLOUDINARY_API_SECRET!,
+});
+
+//C.  Creazione ed avvio del server
 let paginaErrore: string = "";
-// Il metodo readFile non è asincrono quindi lo esegue e nel mentre va avanti
 fs.readFile("./static/error.html", function (err, content) {
   if (err) {
     paginaErrore = "<h1> Risorsa non trovata </h1>";
   } else {
-    // bisogna fare .toString() perchè content è una sequenza di byte
     paginaErrore = content.toString();
   }
 });
 
-// Creazione ed avvio sel server https
+// Creazione ed avvio del server https
 const privateKey = fs.readFileSync("keys/privateKey.pem", "utf8");
 const certificate = fs.readFileSync("keys/certificate.crt", "utf8");
 const credentials = { key: privateKey, cert: certificate };
@@ -52,28 +52,21 @@ const jwtKey = fs.readFileSync("keys/jwtKey", "utf-8");
 
 let httpsServer = https.createServer(credentials, app);
 httpsServer.listen(HTTPS_PORT, function () {
-  console.log("Server in ascolto sulle porta HTTPS:" + HTTPS_PORT);
+  console.log("Server in ascolto sulla porta HTTPS: " + HTTPS_PORT);
 });
 
 //D.  Middleware
 // 1. Request Log
 app.use("/", function (req, res, next) {
-  //originalUrl è la url completa richiesta dal client
   console.log(req.method + ": " + req.originalUrl);
   next();
 });
 
 // 2. Gestione risorse statiche
-// lui riceve la richiesta con il file (es. index.html)
-// la funzione express.static mi concatena ./static + risorsa richiesta (es. ./static + /index.html --> ./static/index.html)
 app.use("/", express.static("./static"));
 
-// 3. Lettura dei parametri post
-// il json con limit indica il limite dei parametri
-// in questo caso impostiamo come limite dei parametri  5 Mb
-// i parametri POST sono restituiti come json all'interno di req.body
-// i parametri GET sono restituiti come json all'intenro di req.query (agganciati automaticamente perchè accodati alla url)
-app.use("/", express.json({ limit: "5mb" }));
+// 3. Lettura dei parametri POST (limite 50MB per upload immagini base64)
+app.use("/", express.json({ limit: "50mb" }));
 
 // 4. Parsing dei parametri GET
 app.use("/", queryStringParser);
@@ -83,13 +76,21 @@ app.use("/", function (req: any, res, next) {
   if (req["parsedQuery"] && Object.keys(req["parsedQuery"]).length > 0)
     console.log("   Parametri Query: " + JSON.stringify(req["parsedQuery"]));
   if (req["body"] && Object.keys(req["body"]).length > 0)
-    console.log("   Parametri Body: " + JSON.stringify(req["body"]));
+    console.log(
+      "   Parametri Body: " + JSON.stringify(req["body"]).substring(0, 200),
+    );
   next();
 });
 
 // 6. Vincoli CORS
-// accettiamo richieste da qualunque client
-const whitelist = ["https://localhost:4200"];
+const whitelist = [
+  "https://localhost:4200",
+  "http://localhost:4200",
+  "https://localhost:8100",
+  "http://localhost:8100",
+  "capacitor://localhost",
+  "http://localhost",
+];
 
 let corsOptions = {
   origin: function (origin: any, callback: any) {
@@ -111,16 +112,18 @@ app.use(cookieParser());
 
 // D2. Gestione login e token
 const cookiesOptions: CookieOptions = {
-  path: "/", // vale per tutte le sotto-route
-  httpOnly: true, // il cookie non è visibile da javascript
-  secure: true, // il cookie è solo trasmesso su canali HTTPS
-  maxAge: parseInt(process.env.DURATA_TOKEN!) * 1000, // durata relativa a partire da ora espressa in millisecondi
-  sameSite: "none", // deve essere messo anche extra-domain (lo manda anche ai server che non appartengono allo stesso dominio della pagina)
+  path: "/",
+  httpOnly: true,
+  secure: true,
+  maxAge: parseInt(process.env.DURATA_TOKEN!) * 1000,
+  sameSite: "none",
 };
 
-// 1. Servizio di Login/Logout/Signup
-// il servizio di login deve essere eseguito prima del controllo di login
-// sennò lui mi controlla il token e non mi permette mai di fare login
+// =============================================
+// SERVIZI PUBBLICI (prima del controllo TOKEN)
+// =============================================
+
+// 1. Servizio di Login
 app.post("/api/login", async function (req, res, next) {
   const username: string = req.body.username;
   const password: string = req.body.password;
@@ -130,23 +133,14 @@ app.post("/api/login", async function (req, res, next) {
     res.status(503).send("Errore di connessione al Database");
     return;
   });
-  const db = client.db(dbName);
-  const collection = client.db(dbName).collection("mails");
-  // la ricerca sarà case sensitive
+  const collection = client.db(dbName).collection("utenti");
   const cmd = collection.findOne({ username });
   cmd.catch(function (err) {
     res.status(500).send("Errore esecuzione query: " + err);
   });
   cmd.then(function (dbUser) {
-    // gli inietta l'intero record utente (compresa la password)
     if (!dbUser) res.status(401).send("Username non valido!");
     else {
-      console.log(
-        "Password ricevuta:",
-        password,
-        "Passwors DB:",
-        dbUser.password,
-      );
       bcrypt.compare(password, dbUser.password, function (err, ok) {
         if (err) {
           res.status(500).send("bcrypt execution error");
@@ -156,7 +150,7 @@ app.post("/api/login", async function (req, res, next) {
           else {
             const TOKEN = createToken(dbUser);
             res.cookie("TOKEN", TOKEN, cookiesOptions);
-            res.send({ username });
+            res.send({ username: dbUser.username });
           }
         }
       });
@@ -172,14 +166,13 @@ app.post("/api/loginWithGoogle", async function (req, res, next) {
   const googleToken = req.body.googleToken;
   const payloadGoogleToken: any = jwt.decode(googleToken);
   console.log("Google token: ", payloadGoogleToken);
-  const currentCollection = "mails";
 
   const client = new MongoClient(connectionString!);
   await client.connect().catch(function (err) {
     res.status(503).send("Errore di connessione al Database");
     return;
   });
-  const collection = client.db(dbName).collection(currentCollection);
+  const collection = client.db(dbName).collection("utenti");
   const cmd = collection.findOne({ username: payloadGoogleToken.email });
   cmd.catch(function (err) {
     res.status(500).send("Errore esecuzione query: " + err);
@@ -187,16 +180,19 @@ app.post("/api/loginWithGoogle", async function (req, res, next) {
   });
   cmd.then(function (dbUser) {
     if (!dbUser) {
+      // Utente non registrato: lo creiamo automaticamente
       let password: string = "";
-      for (let i = 0; i < 12; i++) {
-        password += String.fromCharCode(Math.floor(Math.random() * 26) + 65); // creo una password di 12 lettere maiuscole casuali
+      for (let i = 0; i < 10; i++) {
+        password += String.fromCharCode(Math.floor(Math.random() * 26) + 65);
       }
 
       const newUser: any = {
         username: payloadGoogleToken.email,
         password: bcrypt.hashSync(password, 10),
-        oldPass: password,
-        mail: [],
+        info: {
+          nome: payloadGoogleToken.given_name || "",
+          cognome: payloadGoogleToken.family_name || "",
+        },
       };
 
       const cmd2 = collection.insertOne(newUser);
@@ -217,58 +213,15 @@ app.post("/api/loginWithGoogle", async function (req, res, next) {
       let token = createToken(dbUser);
       res.cookie("TOKEN", token, cookiesOptions);
       res.send({ username: payloadGoogleToken.email });
+      client.close();
     }
   });
 });
 
-// 3. Servizio di SignUp
-app.post("/api/signUp", async function (req: any, res, next) {
-  const username = req.body.username;
-  const password = req.body.password;
-  const currentCollection = "mails";
-  let hashedPassword = "";
-
-  try {
-    hashedPassword = await bcrypt.hash(password, 10);
-  } catch (error) {
-    return res.status(500).send("Errore durante la generazione dell'hash");
-  }
-
-  const client = new MongoClient(connectionString!);
-
-  try {
-    await client.connect();
-    const db = client.db(dbName);
-    const collection = db.collection(currentCollection);
-
-    const userExists = await collection.findOne({ username: username });
-    if (userExists) {
-      return res.status(409).send("Username già utilizzato");
-    }
-
-    const newUser = {
-      username: username,
-      password: hashedPassword,
-      oldPass: password,
-      mail: [],
-    };
-
-    const result = await collection.insertOne(newUser);
-
-    res.status(200).send(result);
-  } catch (err) {
-    res.status(500).send("Errore esecuzione query: " + err);
-  } finally {
-    await client.close();
-  }
-});
-
-// Controllo TOKEN
-// parte solo se faccio delle api
-// app.use non fa match esatto, prende tutti i servizi che iniziano per /api
+// =============================================
+// CONTROLLO TOKEN (protegge tutte le /api/ successive)
+// =============================================
 app.use("/api/", function (req: any, res, next) {
-  // cookies è la collezione dei cookies
-  // andiamo a vedere se nella collezione dei cookies c'è un cookie che si chiama TOKEN se esiste
   if (!req.cookies || !req.cookies.TOKEN)
     res.status(403).send("Token mancante");
   else {
@@ -278,7 +231,6 @@ app.use("/api/", function (req: any, res, next) {
         console.log("Token non valido o scaduto");
         res.status(403).send("Token non valido o scaduto");
       } else {
-        // ricreiamo il token aggiornando la scadenza per ogni nuova richiesta
         let newToken = createToken(payload);
         res.cookie("TOKEN", newToken, cookiesOptions);
         req["username"] = payload.username;
@@ -288,30 +240,341 @@ app.use("/api/", function (req: any, res, next) {
   }
 });
 
+// =============================================
+// SERVIZI PROTETTI (dopo il controllo TOKEN)
+// =============================================
+
+// 3. Logout
 app.post("/api/logout", async function (req: any, res, next) {
   const options = {
-    // mi da tutte le chiavi dentro a cookieOptions
     ...cookiesOptions,
     maxAge: -1,
   };
-  // gli mandiamo un token vuoto con valore -1
-  res.cookie("TOKEN", "", cookiesOptions);
+  res.cookie("TOKEN", "", options);
   res.send({ ok: 1 });
 });
 
-//################## E.  Gestione delle risorse dinamiche ##################
+// =============================================
+// GESTIONE UTENTI (solo ADMIN)
+// =============================================
 
-//F.  Default root e gestione degli errori
-//  Se nessuna delle root dinamiche va a buon fine arriva qua
+// 4. Creazione nuovo utente (solo ADMIN)
+// L'admin inserisce username (email) e info aggiuntive.
+// La password viene generata casualmente dal server e inviata via email.
+app.post("/api/creaUtente", async function (req: any, res, next) {
+  // Verifica che l'utente sia ADMIN
+  if (req["username"] !== "admin") {
+    res.status(403).send("Solo l'utente ADMIN può creare nuovi utenti");
+    return;
+  }
+
+  const nuovoUsername: string = req.body.username; // email del nuovo utente
+  const info: any = req.body.info || {};
+
+  // Genera password casuale di 10 caratteri
+  let password: string = "";
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  for (let i = 0; i < 10; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+
+  const client = new MongoClient(connectionString!);
+  try {
+    await client.connect();
+    const collection = client.db(dbName).collection("utenti");
+
+    // Controlla se l'utente esiste già
+    const existingUser = await collection.findOne({ username: nuovoUsername });
+    if (existingUser) {
+      res.status(409).send("Username già esistente");
+      return;
+    }
+
+    const hashedPassword = bcrypt.hashSync(password, 10);
+    const newUser = {
+      username: nuovoUsername,
+      password: hashedPassword,
+      info: info,
+    };
+
+    const result = await collection.insertOne(newUser);
+
+    // Invia la password via email al nuovo utente
+    sendGmail(nuovoUsername, password);
+
+    res.status(200).send({
+      message: "Utente creato con successo. Password inviata via email.",
+      insertedId: result.insertedId,
+    });
+  } catch (err) {
+    res.status(500).send("Errore durante la creazione dell'utente: " + err);
+  } finally {
+    await client.close();
+  }
+});
+
+// 5. Elenco utenti (solo ADMIN)
+app.get("/api/utenti", async function (req: any, res, next) {
+  if (req["username"] !== "admin") {
+    res.status(403).send("Solo l'utente ADMIN può visualizzare gli utenti");
+    return;
+  }
+
+  const client = new MongoClient(connectionString!);
+  try {
+    await client.connect();
+    const collection = client.db(dbName).collection("utenti");
+    // Non restituiamo la password
+    const utenti = await collection.find({}).project({ password: 0 }).toArray();
+    res.send(utenti);
+  } catch (err) {
+    res.status(500).send("Errore durante la lettura degli utenti: " + err);
+  } finally {
+    await client.close();
+  }
+});
+
+// =============================================
+// GESTIONE PERIZIE
+// =============================================
+
+// 6. Elenco perizie (tutte oppure filtrate per operatore)
+app.get("/api/perizie", async function (req: any, res, next) {
+  const client = new MongoClient(connectionString!);
+  try {
+    await client.connect();
+    const collection = client.db(dbName).collection("perizie");
+
+    let filtro: any = {};
+    // Se viene passato un parametro "operatore", filtriamo per quell'utente
+    if (req["parsedQuery"] && req["parsedQuery"].operatore) {
+      filtro.operatore = req["parsedQuery"].operatore;
+    }
+
+    const perizie = await collection.find(filtro).toArray();
+    res.send(perizie);
+  } catch (err) {
+    res.status(500).send("Errore durante la lettura delle perizie: " + err);
+  } finally {
+    await client.close();
+  }
+});
+
+// 7. Dettaglio singola perizia
+app.get("/api/perizie/:id", async function (req: any, res, next) {
+  const id = req.params.id;
+  const client = new MongoClient(connectionString!);
+  try {
+    await client.connect();
+    const collection = client.db(dbName).collection("perizie");
+    const perizia = await collection.findOne({ _id: new ObjectId(id) });
+    if (!perizia) {
+      res.status(404).send("Perizia non trovata");
+    } else {
+      res.send(perizia);
+    }
+  } catch (err) {
+    res.status(500).send("Errore durante la lettura della perizia: " + err);
+  } finally {
+    await client.close();
+  }
+});
+
+// 8. Creazione nuova perizia (dall'app mobile dell'operatore)
+app.post("/api/perizie", async function (req: any, res, next) {
+  const client = new MongoClient(connectionString!);
+  try {
+    await client.connect();
+    const collection = client.db(dbName).collection("perizie");
+
+    const nuovaPerizia = {
+      descrizione: req.body.descrizione || "",
+      fotografie: [], // Le foto verranno uploadate successivamente
+      operatore: req["username"], // Username dell'operatore dal token JWT
+      dataOra: new Date(),
+      coordinate: {
+        lat: req.body.lat || 0,
+        lng: req.body.lng || 0,
+      },
+    };
+
+    const result = await collection.insertOne(nuovaPerizia);
+    res.status(200).send({
+      message: "Perizia creata con successo",
+      insertedId: result.insertedId,
+    });
+  } catch (err) {
+    res.status(500).send("Errore durante la creazione della perizia: " + err);
+  } finally {
+    await client.close();
+  }
+});
+
+// 9. Upload immagine per una perizia (via Cloudinary)
+app.post("/api/perizie/:id/foto", async function (req: any, res, next) {
+  const periziaId = req.params.id;
+  const imgBase64: string = req.body.img; // immagine in formato base64
+  const commento: string = req.body.commento || "";
+
+  if (!imgBase64) {
+    res.status(400).send("Immagine mancante");
+    return;
+  }
+
+  try {
+    // Upload su Cloudinary
+    const cloudinaryResponse = await cloudinary.uploader.upload(imgBase64, {
+      folder: "perizie",
+      timeout: 30000, // timeout 30 secondi come da specifica
+    });
+
+    // Aggiorna la perizia nel DB aggiungendo la foto al vettore
+    const client = new MongoClient(connectionString!);
+    await client.connect();
+    const collection = client.db(dbName).collection("perizie");
+
+    const foto = {
+      url: cloudinaryResponse.secure_url,
+      public_id: cloudinaryResponse.public_id,
+      commento: commento,
+    };
+
+    const result = await collection.updateOne(
+      { _id: new ObjectId(periziaId) },
+      { $push: { fotografie: foto } as any },
+    );
+
+    await client.close();
+
+    if (result.matchedCount === 0) {
+      res.status(404).send("Perizia non trovata");
+    } else {
+      res.status(200).send({
+        message: "Foto caricata con successo",
+        foto: foto,
+      });
+    }
+  } catch (err) {
+    res.status(500).send("Errore durante l'upload dell'immagine: " + err);
+  }
+});
+
+// 10. Modifica descrizione di una perizia (solo ADMIN)
+app.patch("/api/perizie/:id", async function (req: any, res, next) {
+  const periziaId = req.params.id;
+  const client = new MongoClient(connectionString!);
+  try {
+    await client.connect();
+    const collection = client.db(dbName).collection("perizie");
+
+    const updateFields: any = {};
+    if (req.body.descrizione !== undefined) {
+      updateFields.descrizione = req.body.descrizione;
+    }
+
+    const result = await collection.updateOne(
+      { _id: new ObjectId(periziaId) },
+      { $set: updateFields },
+    );
+
+    if (result.matchedCount === 0) {
+      res.status(404).send("Perizia non trovata");
+    } else {
+      res.send({ message: "Perizia aggiornata con successo" });
+    }
+  } catch (err) {
+    res
+      .status(500)
+      .send("Errore durante l'aggiornamento della perizia: " + err);
+  } finally {
+    await client.close();
+  }
+});
+
+// 11. Modifica commento di una singola foto (solo ADMIN)
+app.patch(
+  "/api/perizie/:id/foto/:fotoIndex",
+  async function (req: any, res, next) {
+    const periziaId = req.params.id;
+    const fotoIndex = parseInt(req.params.fotoIndex);
+    const nuovoCommento: string = req.body.commento;
+
+    const client = new MongoClient(connectionString!);
+    try {
+      await client.connect();
+      const collection = client.db(dbName).collection("perizie");
+
+      // Aggiorna il commento della foto all'indice specificato
+      const updateKey = `fotografie.${fotoIndex}.commento`;
+      const result = await collection.updateOne(
+        { _id: new ObjectId(periziaId) },
+        { $set: { [updateKey]: nuovoCommento } },
+      );
+
+      if (result.matchedCount === 0) {
+        res.status(404).send("Perizia non trovata");
+      } else {
+        res.send({ message: "Commento aggiornato con successo" });
+      }
+    } catch (err) {
+      res
+        .status(500)
+        .send("Errore durante l'aggiornamento del commento: " + err);
+    } finally {
+      await client.close();
+    }
+  },
+);
+
+// 12. Elimina perizia
+app.delete("/api/perizie/:id", async function (req: any, res, next) {
+  const periziaId = req.params.id;
+  const client = new MongoClient(connectionString!);
+  try {
+    await client.connect();
+    const collection = client.db(dbName).collection("perizie");
+
+    // Prima recupera la perizia per eliminare le foto da Cloudinary
+    const perizia = await collection.findOne({ _id: new ObjectId(periziaId) });
+    if (!perizia) {
+      res.status(404).send("Perizia non trovata");
+      return;
+    }
+
+    // Elimina le foto da Cloudinary
+    if (perizia.fotografie && perizia.fotografie.length > 0) {
+      for (const foto of perizia.fotografie) {
+        if (foto.public_id) {
+          await cloudinary.uploader
+            .destroy(foto.public_id)
+            .catch((err: any) => {
+              console.log("Errore eliminazione foto Cloudinary: " + err);
+            });
+        }
+      }
+    }
+
+    // Elimina la perizia dal DB
+    const result = await collection.deleteOne({ _id: new ObjectId(periziaId) });
+    res.send({
+      message: "Perizia eliminata con successo",
+      deletedCount: result.deletedCount,
+    });
+  } catch (err) {
+    res.status(500).send("Errore durante l'eliminazione della perizia: " + err);
+  } finally {
+    await client.close();
+  }
+});
+
+//F.  Default route e gestione degli errori
 app.use("/", function (req, res, next) {
   if (req.originalUrl.startsWith("/api/")) {
-    // servizio non trovato
     res.status(404).send("Risorsa non trovata");
   } else if (req.accepts("html")) {
-    // se il client sta richiedendo una pagina html
     res.status(404).send(paginaErrore);
   } else res.sendStatus(404);
-  // dovrebbe essere equivalente a res.status(404).send("");
 });
 
 //G.  Gestione degli errori
@@ -323,17 +586,16 @@ app.use(
     res: express.Response,
     next: express.NextFunction,
   ) {
-    //  err.stack mi indica l'elenco completo degli errori
-    //  err.message è il messaggio riassuntivo dell'errore
     res.status(500).send(err.message);
     console.log("******** ERRORE ********: \n" + err.stack);
   },
 );
 
-function createToken(data: any) {
-  // Con .getTime() ho il tempo di ora espresso in timestampsUnix in millisecondi
-  // la procedura che crea il token vuole il timestampsUnix in secondi quindi faccio diviso 1000
+// =============================================
+// FUNZIONI UTILITY
+// =============================================
 
+function createToken(data: any) {
   const now = Math.floor(new Date().getTime() / 1000);
   const payload = {
     _id: data._id,
@@ -347,182 +609,28 @@ function createToken(data: any) {
 }
 
 function sendGmail(email: string, password: string) {
-  let message = fs.readFileSync("./message.html", "utf-8");
-  message = message.replace("__user", email);
-  message = message.replace("__password", password);
   const transporter = nodemailer.createTransport({
     service: "gmail",
     auth: googleOAuth,
   });
   const mailOptions = {
-    from: googleOAuth.User,
+    from: googleOAuth.user,
     to: email,
     subject: "Nuovo account Rilievi e Perizie",
-    html: message,
-    attachments: [{ filename: "qrCode.png", path: "./qrCode.png" }],
+    html: `
+      <h2>Benvenuto su Rilievi e Perizie</h2>
+      <p>Il tuo account è stato creato con successo.</p>
+      <p><strong>Username:</strong> ${email}</p>
+      <p><strong>Password:</strong> ${password}</p>
+      <p>Utilizza queste credenziali per accedere all'applicazione.</p>
+    `,
   };
   transporter.sendMail(mailOptions, function (err, info) {
     if (err) {
-      console.log(err.stack);
+      console.log("Errore invio mail:", err.stack);
     } else {
-      console.log(info);
+      console.log("Email inviata:", info);
       transporter.close();
     }
   });
 }
-
-// ##### Socket #####
-// httpsServer è il server https su cui il socket va ad appoggiarsi, cors è la configurazione dei cors per il socket
-
-// i docminic he sono abilitati a fare richeste al server http possono essere abilitati anche al socket
-// non posso abilitare al socket dei domini che non sono abilitati al server http
-// è possibile però abilitare dei domini al server http e alcuni domini al socket (es. se voglio che il socket sia accessibile solo da localhost e non da altri domini)
-// i domini del websocket sono un sottoinsieme dei domini del server http, non possono essere più di quelli del server http
-
-const webSocketServer = new Server(httpsServer, {
-  cors: { origin: "*" },
-});
-// Vettore utenti per ogni stanza
-const roomUsers: Record<string, string[]> = {};
-
-webSocketServer.on("connection", function (connection) {
-  let user: any = {};
-
-  connection.on("JoinRoom", async function (strUser: string) {
-    user = JSON.parse(strUser);
-    connection.join(user.room);
-
-    if (!roomUsers[user.room]) {
-      roomUsers[user.room] = [];
-    }
-    roomUsers[user.room]!.push(user.username);
-
-    const altriUtenti = roomUsers[user.room]!.filter(
-      (u: string) => u !== user.username,
-    );
-    connection.emit("JoinRoomAck", JSON.stringify(altriUtenti));
-
-    connection.to(user.room).emit("UserJoined", user.username);
-
-    // Salva data e ora dell'ultimo accesso dell'utente nel db
-    // $set crea il campo automaticamente se non esiste
-    try {
-      const client = new MongoClient(connectionString!);
-      await client.connect();
-      const collection = client.db(dbName).collection("mails");
-      // Cerca sia username esatto ("jacopo") sia email completa ("jacopo@...")
-      const result = await collection.updateOne(
-        { username: { $regex: new RegExp("^" + user.username + "(@|$)") } },
-        { $set: { ultimoAccesso: new Date() } },
-      );
-      console.log(
-        "Update ultimo accesso:",
-        user.username,
-        "matchedCount:",
-        result.matchedCount,
-        "modifiedCount:",
-        result.modifiedCount,
-      );
-      await client.close();
-    } catch (err) {
-      console.log("Errore salvataggio ultimo accesso:", err);
-    }
-  });
-
-  // Evento uscita volontaria dalla stanza (pulsante "Esci dalla Stanza")
-  connection.on("LeaveRoom", function () {
-    if (user.room && roomUsers[user.room]) {
-      // Rimuove l'utente dal vettore della stanza
-      roomUsers[user.room] = roomUsers[user.room]!.filter(
-        (u: string) => u !== user.username,
-      );
-      // Notifica tutti gli utenti rimasti nella stanza che l'utente è uscito
-      connection.to(user.room).emit("UserLeft", user.username);
-      // Fa uscire il socket dalla room
-      connection.leave(user.room);
-      console.log(`${user.username} ha lasciato la stanza ${user.room}`);
-    }
-  });
-
-  /*
-1)il server nel momento in cui un utente accede ad una stanza, memorizza le informazioni dell'utente(solo il username)
-all'interno di un apposito vettore (uno per ogni stanza)
-
-2)dopo aver immesso l'utente nella stanza, il server restituisce al client il vettore degli utenti al momento presenti all'interno della stanza (utente corrente escluso)
-
-
-3)in corrispondenza dell'ok del client, prima della sezione preposta alla visualizzazione dei messaggi, inserire una sezione aggiuntiva
-(semplice tag div) in cui visualizza nome e immagine di tutti gli utenti presenti all'interno della stanza(utente corrente escluso)
-
-
-
-dal momento che gli utenti già presenti non si acccorgono dell'ingresso del nuovo utente
-aggiungere una utility tale per cui, quando un nuovo utente entra, il server invia a tutti gli
-utenti di quella stanza (utente corrente escluso) un apposito messaggio contenente username dell'utente appena entrato, in modo da farlo sapere
-a tutti, poi aggiornare i banner
-
-quando un utente esce tramite il pulsante esci dalla stanza, il client invia un messaggio di uscita in corrispondenza del quale il server elimina l'utente
-dalla lista degli utenti di quella stanza e invia a tutti gli utenti il messaggio che gli dice lo username di chi è uscito,
-in modo che possano aggiornare in tempo reale il loro banner degli utenti
-
-
-
-salvare data e ora dell'ultimo accesso dell'utente in una stanza qualsiasi, nel caso non ci sia il campo, esso viene creato automaticamente
-
-
-
-
-		<button type="button"
-				class="btn btn-link mt-0 p-0"
-				id="btnPasswordDimenticata">
-			cambia password  
-		</button>			
-  del click su cambio Password 
-(pagina di login) inviare una richiesta al server di registrazione della nuova password scelta dall'utente corrente
-aggiornare sia campo oldPass con la nuova scritta in chiaro sia il campo password con la nuova cifrata in bcrypt
-*/
-
-  connection.on("TxtMessage", async function (message: string) {
-    const response = {
-      from: user.username,
-      body: message,
-      date: new Date(),
-    };
-    webSocketServer
-      .to(user.room)
-      .emit("NotifyMessage", JSON.stringify(response));
-
-    const client = new MongoClient(connectionString!);
-    await client.connect();
-    const collection = client.db(dbName).collection(user.room);
-    await collection.insertOne(response);
-    await client.close();
-  });
-
-  connection.on("askDataRoom", async function (room: string) {
-    const client = new MongoClient(connectionString!);
-    await client.connect();
-    const collection = client.db(dbName).collection(room);
-    const messaggi = await collection.find({}).toArray();
-    await client.close();
-
-    connection.emit("dataRoom", JSON.stringify(messaggi));
-    // connection.emit("utenteConnesso",roomUsers[room]);
-    console.log("l'utente si è connesso alla room" + room);
-  });
-
-  connection.on("disconnect", function () {
-    console.log(`${user.username} disconnected`);
-    // Rimuove l'utente dal vettore della stanza al momento della disconnessione
-    if (user.room && roomUsers[user.room]) {
-      roomUsers[user.room] = roomUsers[user.room]!.filter(
-        (u: string) => u !== user.username,
-      );
-      // Notifica tutti gli utenti rimasti nella stanza
-      connection.to(user.room).emit("UserLeft", user.username);
-    }
-  });
-});
-
-//il server, sempre al momento dell'accesso di un nuovo utente, provvede a salvare nel DB la data e ora
-//dell'ultimo accesso dell'utente. Se il campo non esiste viene creato automaticamente
