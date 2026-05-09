@@ -1,482 +1,528 @@
-// A. Import delle librerie
+//A.  Import delle librerie
+import http from "http";
+import url from "url";
 import fs from "fs";
-import https from "https";
 import express, { CookieOptions } from "express";
 import dotenv from "dotenv";
-import { MongoClient, ObjectId } from "mongodb";
+import { Document, MongoClient, ObjectId, WithId } from "mongodb";
+import queryStringParser from "./queryStringParser";
 import cors from "cors";
+import https from "https";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import path from "path";
 import cookieParser from "cookie-parser";
+import e from "express";
 import nodemailer from "nodemailer";
-import multer from "multer";
-import { v2 as cloudinary } from "cloudinary";
-import { Readable } from "stream";
-import queryStringParser from "./queryStringParser";
+import { Server, Socket } from "socket.io";
 
-// B. Configurazioni
-dotenv.config({ path: ".env" });
+// i parametri GET sono restituiti dentro req.query
+// i parametri POST sono restituiti dentro req.body
+// i parametri passati come risorsa sono restituiti dentro req.params
+
+//B.  Configurazioni
+// funzione di callback richiamata in corrispondenza di ogni richiesta al server
 const app: express.Express = express();
-
-const connectionString = process.env.connectionStringAtlas!;
-const HTTPS_PORT       = parseInt(process.env.HTTPS_PORT!);
-const dbName           = process.env.dbName!;
-const jwtKey           = fs.readFileSync("keys/jwtKey", "utf-8");
-
-cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME!,
-    api_key:    process.env.CLOUDINARY_API_KEY!,
-    api_secret: process.env.CLOUDINARY_API_SECRET!,
+dotenv.config({
+  path: ".env",
 });
+const connectionString = process.env.connectionStringAtlas;
+const HTTPS_PORT = parseInt(process.env.HTTPS_PORT!);
+const dbName = process.env.dbName;
+const googleOAuth = JSON.parse(process.env.googleOAuth!);
 
-// Multer: salva in memoria, poi inviamo a Cloudinary via stream
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-
-// C. Avvio server HTTPS
-let paginaErrore = "";
+//C.  Creazione ed avvio del server http
+// const server = http.createServer(app);
+let paginaErrore: string = "";
+// Il metodo readFile non è asincrono quindi lo esegue e nel mentre va avanti
 fs.readFile("./static/error.html", function (err, content) {
-    paginaErrore = err ? "<h1>Risorsa non trovata</h1>" : content.toString();
+  if (err) {
+    paginaErrore = "<h1> Risorsa non trovata </h1>";
+  } else {
+    // bisogna fare .toString() perchè content è una sequenza di byte
+    paginaErrore = content.toString();
+  }
 });
 
-const privateKey   = fs.readFileSync("keys/privateKey.pem", "utf8");
-const certificate  = fs.readFileSync("keys/certificate.crt", "utf8");
-const httpsServer  = https.createServer({ key: privateKey, cert: certificate }, app);
+// Creazione ed avvio sel server https
+const privateKey = fs.readFileSync("keys/privateKey.pem", "utf8");
+const certificate = fs.readFileSync("keys/certificate.crt", "utf8");
+const credentials = { key: privateKey, cert: certificate };
+const jwtKey = fs.readFileSync("keys/jwtKey", "utf-8");
 
+let httpsServer = https.createServer(credentials, app);
 httpsServer.listen(HTTPS_PORT, function () {
-    console.log("Server HTTPS in ascolto sulla porta: " + HTTPS_PORT);
+  console.log("Server in ascolto sulle porta HTTPS:" + HTTPS_PORT);
 });
 
-// D. Middleware
-// 1. Request log
+//D.  Middleware
+// 1. Request Log
 app.use("/", function (req, res, next) {
-    console.log(req.method + ": " + req.originalUrl);
-    next();
+  //originalUrl è la url completa richiesta dal client
+  console.log(req.method + ": " + req.originalUrl);
+  next();
 });
 
-// 2. Risorse statiche
+// 2. Gestione risorse statiche
+// lui riceve la richiesta con il file (es. index.html)
+// la funzione express.static mi concatena ./static + risorsa richiesta (es. ./static + /index.html --> ./static/index.html)
 app.use("/", express.static("./static"));
 
-// 3. Body JSON
+// 3. Lettura dei parametri post
+// il json con limit indica il limite dei parametri
+// in questo caso impostiamo come limite dei parametri  5 Mb
+// i parametri POST sono restituiti come json all'interno di req.body
+// i parametri GET sono restituiti come json all'intenro di req.query (agganciati automaticamente perchè accodati alla url)
 app.use("/", express.json({ limit: "5mb" }));
 
-// 4. Parsing parametri GET
+// 4. Parsing dei parametri GET
 app.use("/", queryStringParser);
 
-// 5. Log parametri
+// 5. Log dei parametri
 app.use("/", function (req: any, res, next) {
-    if (req["parsedQuery"] && Object.keys(req["parsedQuery"]).length > 0)
-        console.log("   Parametri Query: " + JSON.stringify(req["parsedQuery"]));
-    if (req["body"] && Object.keys(req["body"]).length > 0)
-        console.log("   Parametri Body: " + JSON.stringify(req["body"]));
-    next();
+  if (req["parsedQuery"] && Object.keys(req["parsedQuery"]).length > 0)
+    console.log("   Parametri Query: " + JSON.stringify(req["parsedQuery"]));
+  if (req["body"] && Object.keys(req["body"]).length > 0)
+    console.log("   Parametri Body: " + JSON.stringify(req["body"]));
+  next();
 });
 
-// 6. CORS
+// 6. Vincoli CORS
+// accettiamo richieste da qualunque client
 const whitelist = ["https://localhost:4200"];
-const corsOptions = {
-    origin: function (origin: any, callback: any) {
-        if (!origin) return callback(null, true);
-        if (whitelist.indexOf(origin) === -1)
-            return callback(new Error("CORS policy: origine non consentita"), false);
-        return callback(null, true);
-    },
-    credentials: true,
+
+let corsOptions = {
+  origin: function (origin: any, callback: any) {
+    if (!origin)
+      // browser direct call
+      return callback(null, true);
+    if (whitelist.indexOf(origin) == -1) {
+      let msg = `The CORS policy for this site does not allow access from the specified Origin.`;
+      return callback(new Error(msg), false);
+    } else return callback(null, true);
+  },
+  credentials: true,
 };
+
 app.use("/", cors(corsOptions));
 
-// 7. Cookie parser
+// 7. Parsing dei cookies
 app.use(cookieParser());
 
-// D2. Opzioni cookie JWT
+// D2. Gestione login e token
 const cookiesOptions: CookieOptions = {
-    path:     "/",
-    httpOnly: true,
-    secure:   true,
-    maxAge:   parseInt(process.env.DURATA_TOKEN!) * 1000,
-    sameSite: "none",
+  path: "/", // vale per tutte le sotto-route
+  httpOnly: true, // il cookie non è visibile da javascript
+  secure: true, // il cookie è solo trasmesso su canali HTTPS
+  maxAge: parseInt(process.env.DURATA_TOKEN!) * 1000, // durata relativa a partire da ora espressa in millisecondi
+  sameSite: "none", // deve essere messo anche extra-domain (lo manda anche ai server che non appartengono allo stesso dominio della pagina)
 };
 
-// ────────────────────────────────────────────────────────────────────────────
-// E. Servizi pubblici (senza controllo token)
-// ────────────────────────────────────────────────────────────────────────────
+// 1. Servizio di Login/Logout/Signup
+// il servizio di login deve essere eseguito prima del controllo di login
+// sennò lui mi controlla il token e non mi permette mai di fare login
+app.post("/api/login", async function (req, res, next) {
+  const username: string = req.body.username;
+  const password: string = req.body.password;
 
-// POST /api/login
-app.post("/api/login", async function (req, res) {
-    const username: string = req.body.username;
-    const password: string = req.body.password;
-
-    const client = new MongoClient(connectionString);
-    await client.connect().catch(function () {
-        res.status(503).send("Errore di connessione al Database");
-        return;
-    });
-
-    const collection = client.db(dbName).collection("utenti");
-    const cmd = collection.findOne({ username });
-
-    cmd.catch(function (err) {
-        res.status(500).send("Errore esecuzione query: " + err);
-    });
-
-    cmd.then(function (dbUser) {
-        if (!dbUser) {
-            res.status(401).send("Username non valido!");
+  const client = new MongoClient(connectionString!);
+  await client.connect().catch(function (err) {
+    res.status(503).send("Errore di connessione al Database");
+    return;
+  });
+  const db = client.db(dbName);
+  const collection = client.db(dbName).collection("mails");
+  // la ricerca sarà case sensitive
+  const cmd = collection.findOne({ username });
+  cmd.catch(function (err) {
+    res.status(500).send("Errore esecuzione query: " + err);
+  });
+  cmd.then(function (dbUser) {
+    // gli inietta l'intero record utente (compresa la password)
+    if (!dbUser) res.status(401).send("Username non valido!");
+    else {
+      console.log(
+        "Password ricevuta:",
+        password,
+        "Passwors DB:",
+        dbUser.password,
+      );
+      bcrypt.compare(password, dbUser.password, function (err, ok) {
+        if (err) {
+          res.status(500).send("bcrypt execution error");
+          console.log(err?.stack);
         } else {
-            bcrypt.compare(password, dbUser.password, function (err, ok) {
-                if (err) {
-                    res.status(500).send("Errore bcrypt");
-                } else if (!ok) {
-                    res.status(401).send("Password non valida!");
-                } else {
-                    const token = createToken(dbUser);
-                    res.cookie("TOKEN", token, cookiesOptions);
-                    res.send({ username: dbUser.username, isAdmin: dbUser.isAdmin });
-                }
-            });
+          if (!ok) res.status(401).send("Password non valida!");
+          else {
+            const TOKEN = createToken(dbUser);
+            res.cookie("TOKEN", TOKEN, cookiesOptions);
+            res.send({ username });
+          }
         }
-    });
-
-    cmd.finally(function () { client.close(); });
-});
-
-// POST /api/logout
-app.post("/api/logout", function (req, res) {
-    res.cookie("TOKEN", "", { ...cookiesOptions, maxAge: -1 });
-    res.send({ ok: 1 });
-});
-
-// ────────────────────────────────────────────────────────────────────────────
-// Controllo TOKEN — protegge tutte le /api/ successive
-// ────────────────────────────────────────────────────────────────────────────
-app.use("/api/", function (req: any, res, next) {
-    if (!req.cookies || !req.cookies.TOKEN) {
-        res.status(403).send("Token mancante");
-        return;
+      });
     }
+  });
+  cmd.finally(function () {
+    client.close();
+  });
+});
+
+// 2. LoginWithGoogle
+app.post("/api/loginWithGoogle", async function (req, res, next) {
+  const googleToken = req.body.googleToken;
+  const payloadGoogleToken: any = jwt.decode(googleToken);
+  console.log("Google token: ", payloadGoogleToken);
+  const currentCollection = "mails";
+
+  const client = new MongoClient(connectionString!);
+  await client.connect().catch(function (err) {
+    res.status(503).send("Errore di connessione al Database");
+    return;
+  });
+  const collection = client.db(dbName).collection(currentCollection);
+  const cmd = collection.findOne({ username: payloadGoogleToken.email });
+  cmd.catch(function (err) {
+    res.status(500).send("Errore esecuzione query: " + err);
+    client.close();
+  });
+  cmd.then(function (dbUser) {
+    if (!dbUser) {
+      let password: string = "";
+      for (let i = 0; i < 12; i++) {
+        password += String.fromCharCode(Math.floor(Math.random() * 26) + 65); // creo una password di 12 lettere maiuscole casuali
+      }
+
+      const newUser: any = {
+        username: payloadGoogleToken.email,
+        password: bcrypt.hashSync(password, 10),
+        oldPass: password,
+        mail: [],
+      };
+
+      const cmd2 = collection.insertOne(newUser);
+      cmd2.catch(function (err) {
+        res.status(500).send("Errore esecuzione query: " + err);
+      });
+      cmd2.then(function (MongoResponse) {
+        newUser._id = MongoResponse.insertedId.toString();
+        sendGmail(payloadGoogleToken.email, password);
+        let token = createToken(newUser);
+        res.cookie("TOKEN", token, cookiesOptions);
+        res.send({ username: payloadGoogleToken.email });
+      });
+      cmd2.finally(function () {
+        client.close();
+      });
+    } else {
+      let token = createToken(dbUser);
+      res.cookie("TOKEN", token, cookiesOptions);
+      res.send({ username: payloadGoogleToken.email });
+    }
+  });
+});
+
+// 3. Servizio di SignUp
+app.post("/api/signUp", async function (req: any, res, next) {
+  const username = req.body.username;
+  const password = req.body.password;
+  const currentCollection = "mails";
+  let hashedPassword = "";
+
+  try {
+    hashedPassword = await bcrypt.hash(password, 10);
+  } catch (error) {
+    return res.status(500).send("Errore durante la generazione dell'hash");
+  }
+
+  const client = new MongoClient(connectionString!);
+
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const collection = db.collection(currentCollection);
+
+    const userExists = await collection.findOne({ username: username });
+    if (userExists) {
+      return res.status(409).send("Username già utilizzato");
+    }
+
+    const newUser = {
+      username: username,
+      password: hashedPassword,
+      oldPass: password,
+      mail: [],
+    };
+
+    const result = await collection.insertOne(newUser);
+
+    res.status(200).send(result);
+  } catch (err) {
+    res.status(500).send("Errore esecuzione query: " + err);
+  } finally {
+    await client.close();
+  }
+});
+
+// Controllo TOKEN
+// parte solo se faccio delle api
+// app.use non fa match esatto, prende tutti i servizi che iniziano per /api
+app.use("/api/", function (req: any, res, next) {
+  // cookies è la collezione dei cookies
+  // andiamo a vedere se nella collezione dei cookies c'è un cookie che si chiama TOKEN se esiste
+  if (!req.cookies || !req.cookies.TOKEN)
+    res.status(403).send("Token mancante");
+  else {
     const TOKEN = req.cookies.TOKEN;
     jwt.verify(TOKEN, jwtKey, function (err: any, payload: any) {
-        if (err) {
-            res.status(403).send("Token non valido o scaduto");
-        } else {
-            const newToken = createToken(payload);
-            res.cookie("TOKEN", newToken, cookiesOptions);
-            req["username"] = payload.username;
-            req["isAdmin"]  = payload.isAdmin;
-            next();
-        }
+      if (err) {
+        console.log("Token non valido o scaduto");
+        res.status(403).send("Token non valido o scaduto");
+      } else {
+        // ricreiamo il token aggiornando la scadenza per ogni nuova richiesta
+        let newToken = createToken(payload);
+        res.cookie("TOKEN", newToken, cookiesOptions);
+        req["username"] = payload.username;
+        next();
+      }
     });
+  }
 });
 
-// ────────────────────────────────────────────────────────────────────────────
-// F. Servizi protetti — UTENTI (solo admin)
-// ────────────────────────────────────────────────────────────────────────────
-
-// GET /api/utenti — lista tutti gli utenti (senza password)
-app.get("/api/utenti", async function (req: any, res) {
-    if (!req["isAdmin"]) { res.status(403).send("Accesso riservato agli amministratori"); return; }
-
-    const client = new MongoClient(connectionString);
-    await client.connect().catch(() => res.status(503).send("Errore DB"));
-    const collection = client.db(dbName).collection("utenti");
-    const utenti = await collection.find({}, { projection: { password: 0 } }).toArray();
-    await client.close();
-    res.send(utenti);
+app.post("/api/logout", async function (req: any, res, next) {
+  const options = {
+    // mi da tutte le chiavi dentro a cookieOptions
+    ...cookiesOptions,
+    maxAge: -1,
+  };
+  // gli mandiamo un token vuoto con valore -1
+  res.cookie("TOKEN", "", cookiesOptions);
+  res.send({ ok: 1 });
 });
 
-// POST /api/utenti — crea nuovo utente (solo admin)
-// Body: { username, info? }
-app.post("/api/utenti", async function (req: any, res) {
-    if (!req["isAdmin"]) { res.status(403).send("Accesso riservato agli amministratori"); return; }
+//################## E.  Gestione delle risorse dinamiche ##################
 
-    const username: string = req.body.username?.toLowerCase().trim();
-    const info: string     = req.body.info || "";
-
-    if (!username) { res.status(400).send("Username obbligatorio"); return; }
-
-    const password = generaPassword();
-    const hash     = await bcrypt.hash(password, 10);
-
-    const client = new MongoClient(connectionString);
-    await client.connect().catch(() => res.status(503).send("Errore DB"));
-    const collection = client.db(dbName).collection("utenti");
-
-    const esistente = await collection.findOne({ username });
-    if (esistente) {
-        await client.close();
-        res.status(409).send("Utente già esistente");
-        return;
-    }
-
-    const nuovoUtente = { username, password: hash, info, isAdmin: false };
-    await collection.insertOne(nuovoUtente);
-    await client.close();
-
-    // Invia mail con le credenziali
-    try { await inviaMail(username, password); }
-    catch (e) { console.log("Errore invio mail:", e); }
-
-    res.status(201).send({ messaggio: "Utente creato, mail inviata", username });
+//F.  Default root e gestione degli errori
+//  Se nessuna delle root dinamiche va a buon fine arriva qua
+app.use("/", function (req, res, next) {
+  if (req.originalUrl.startsWith("/api/")) {
+    // servizio non trovato
+    res.status(404).send("Risorsa non trovata");
+  } else if (req.accepts("html")) {
+    // se il client sta richiedendo una pagina html
+    res.status(404).send(paginaErrore);
+  } else res.sendStatus(404);
+  // dovrebbe essere equivalente a res.status(404).send("");
 });
 
-// DELETE /api/utenti/:username — elimina utente (solo admin)
-app.delete("/api/utenti/:username", async function (req: any, res) {
-    if (!req["isAdmin"]) { res.status(403).send("Accesso riservato agli amministratori"); return; }
-    if (req.params.username === req["username"]) { res.status(400).send("Non puoi eliminare te stesso"); return; }
-
-    const client = new MongoClient(connectionString);
-    await client.connect().catch(() => res.status(503).send("Errore DB"));
-    const collection = client.db(dbName).collection("utenti");
-    const result = await collection.deleteOne({ username: req.params.username });
-    await client.close();
-
-    if (result.deletedCount === 0) { res.status(404).send("Utente non trovato"); return; }
-    res.send({ messaggio: "Utente eliminato" });
-});
-
-// ────────────────────────────────────────────────────────────────────────────
-// G. Servizi protetti — PERIZIE
-// ────────────────────────────────────────────────────────────────────────────
-
-// GET /api/perizie — admin: tutte | operatore: solo le sue
-app.get("/api/perizie", async function (req: any, res) {
-    const filtro = req["isAdmin"] ? {} : { username: req["username"] };
-
-    const client = new MongoClient(connectionString);
-    await client.connect().catch(() => res.status(503).send("Errore DB"));
-    const collection = client.db(dbName).collection("perizie");
-    const perizie = await collection.find(filtro).sort({ dataOra: -1 }).toArray();
-    await client.close();
-    res.send(perizie);
-});
-
-// GET /api/perizie/utente/:username — perizie di un utente specifico (solo admin)
-app.get("/api/perizie/utente/:username", async function (req: any, res) {
-    if (!req["isAdmin"]) { res.status(403).send("Accesso riservato agli amministratori"); return; }
-
-    const client = new MongoClient(connectionString);
-    await client.connect().catch(() => res.status(503).send("Errore DB"));
-    const collection = client.db(dbName).collection("perizie");
-    const perizie = await collection.find({ username: req.params.username }).sort({ dataOra: -1 }).toArray();
-    await client.close();
-    res.send(perizie);
-});
-
-// GET /api/perizie/:id — singola perizia
-app.get("/api/perizie/:id", async function (req: any, res) {
-    const client = new MongoClient(connectionString);
-    await client.connect().catch(() => res.status(503).send("Errore DB"));
-    const collection = client.db(dbName).collection("perizie");
-    const perizia = await collection.findOne({ _id: new ObjectId(req.params.id) });
-    await client.close();
-
-    if (!perizia) { res.status(404).send("Perizia non trovata"); return; }
-    if (!req["isAdmin"] && perizia.username !== req["username"]) {
-        res.status(403).send("Non autorizzato"); return;
-    }
-    res.send(perizia);
-});
-
-// POST /api/perizie — crea nuova perizia (senza foto)
-// Body: { codice, descrizione, lat, lng }
-app.post("/api/perizie", async function (req: any, res) {
-    const { codice, descrizione, lat, lng } = req.body;
-    if (!codice || !descrizione || lat === undefined || lng === undefined) {
-        res.status(400).send("Codice, descrizione e coordinate obbligatori"); return;
-    }
-
-    const nuovaPerizia = {
-        codice,
-        descrizione,
-        foto: [],
-        username:   req["username"],
-        dataOra:    new Date(),
-        coordinate: { lat: Number(lat), lng: Number(lng) },
-    };
-
-    const client = new MongoClient(connectionString);
-    await client.connect().catch(() => res.status(503).send("Errore DB"));
-    const collection = client.db(dbName).collection("perizie");
-
-    try {
-        const result = await collection.insertOne(nuovaPerizia);
-        await client.close();
-        res.status(201).send({ ...nuovaPerizia, _id: result.insertedId });
-    } catch (err: any) {
-        await client.close();
-        if (err.code === 11000) res.status(409).send("Codice perizia già esistente");
-        else res.status(500).send("Errore creazione perizia");
-    }
-});
-
-// POST /api/perizie/:id/foto — aggiunge una foto (upload su Cloudinary)
-// FormData: { foto: File, commento?: string }
-app.post("/api/perizie/:id/foto", upload.single("foto"), async function (req: any, res) {
-    if (!req.file) { res.status(400).send("Nessuna foto inviata"); return; }
-
-    const client = new MongoClient(connectionString);
-    await client.connect().catch(() => res.status(503).send("Errore DB"));
-    const collection = client.db(dbName).collection("perizie");
-    const perizia = await collection.findOne({ _id: new ObjectId(req.params.id) });
-
-    if (!perizia) { await client.close(); res.status(404).send("Perizia non trovata"); return; }
-    if (!req["isAdmin"] && perizia.username !== req["username"]) {
-        await client.close(); res.status(403).send("Non autorizzato"); return;
-    }
-
-    try {
-        const { url, publicId } = await uploadToCloudinary(req.file.buffer);
-        const nuovaFoto = { url, publicId, commento: req.body.commento || "" };
-        await collection.updateOne(
-            { _id: new ObjectId(req.params.id) },
-            { $push: { foto: nuovaFoto } }
-        );
-        await client.close();
-        res.send({ messaggio: "Foto aggiunta", foto: nuovaFoto });
-    } catch (err) {
-        await client.close();
-        res.status(500).send("Errore upload foto");
-    }
-});
-
-// PATCH /api/perizie/:id — modifica descrizione
-// Body: { descrizione }
-app.patch("/api/perizie/:id", async function (req: any, res) {
-    const client = new MongoClient(connectionString);
-    await client.connect().catch(() => res.status(503).send("Errore DB"));
-    const collection = client.db(dbName).collection("perizie");
-    const perizia = await collection.findOne({ _id: new ObjectId(req.params.id) });
-
-    if (!perizia) { await client.close(); res.status(404).send("Perizia non trovata"); return; }
-    if (!req["isAdmin"] && perizia.username !== req["username"]) {
-        await client.close(); res.status(403).send("Non autorizzato"); return;
-    }
-
-    await collection.updateOne(
-        { _id: new ObjectId(req.params.id) },
-        { $set: { descrizione: req.body.descrizione } }
-    );
-    await client.close();
-    res.send({ messaggio: "Perizia aggiornata" });
-});
-
-// PATCH /api/perizie/:id/foto/:fotoIndex — modifica commento di una foto
-// Body: { commento }
-app.patch("/api/perizie/:id/foto/:fotoIndex", async function (req: any, res) {
-    const idx = parseInt(req.params.fotoIndex);
-    if (isNaN(idx) || idx < 0) { res.status(400).send("Indice foto non valido"); return; }
-
-    const client = new MongoClient(connectionString);
-    await client.connect().catch(() => res.status(503).send("Errore DB"));
-    const collection = client.db(dbName).collection("perizie");
-    const perizia = await collection.findOne({ _id: new ObjectId(req.params.id) });
-
-    if (!perizia) { await client.close(); res.status(404).send("Perizia non trovata"); return; }
-    if (!req["isAdmin"] && perizia.username !== req["username"]) {
-        await client.close(); res.status(403).send("Non autorizzato"); return;
-    }
-    if (idx >= perizia.foto.length) {
-        await client.close(); res.status(400).send("Indice foto fuori range"); return;
-    }
-
-    const campo = `foto.${idx}.commento`;
-    await collection.updateOne(
-        { _id: new ObjectId(req.params.id) },
-        { $set: { [campo]: req.body.commento } }
-    );
-    await client.close();
-    res.send({ messaggio: "Commento aggiornato" });
-});
-
-// DELETE /api/perizie/:id/foto/:fotoIndex — elimina foto (solo admin)
-app.delete("/api/perizie/:id/foto/:fotoIndex", async function (req: any, res) {
-    if (!req["isAdmin"]) { res.status(403).send("Accesso riservato agli amministratori"); return; }
-    const idx = parseInt(req.params.fotoIndex);
-
-    const client = new MongoClient(connectionString);
-    await client.connect().catch(() => res.status(503).send("Errore DB"));
-    const collection = client.db(dbName).collection("perizie");
-    const perizia = await collection.findOne({ _id: new ObjectId(req.params.id) });
-
-    if (!perizia) { await client.close(); res.status(404).send("Perizia non trovata"); return; }
-    if (isNaN(idx) || idx < 0 || idx >= perizia.foto.length) {
-        await client.close(); res.status(400).send("Indice foto non valido"); return;
-    }
-
-    // Elimina da Cloudinary
-    try { await cloudinary.uploader.destroy(perizia.foto[idx].publicId); }
-    catch (e) { console.log("Errore eliminazione Cloudinary:", e); }
-
-    // Rimuove la foto dall'array con $unset + $pull
-    const campo = `foto.${idx}`;
-    await collection.updateOne({ _id: new ObjectId(req.params.id) }, { $unset: { [campo]: 1 } });
-    await collection.updateOne({ _id: new ObjectId(req.params.id) }, { $pull: { foto: null } });
-    await client.close();
-    res.send({ messaggio: "Foto eliminata" });
-});
-
-// ────────────────────────────────────────────────────────────────────────────
-// H. Default e gestione errori
-// ────────────────────────────────────────────────────────────────────────────
-app.use("/", function (req, res) {
-    if (req.originalUrl.startsWith("/api/")) res.status(404).send("Servizio non trovato");
-    else if (req.accepts("html")) res.status(404).send(paginaErrore);
-    else res.sendStatus(404);
-});
-
-app.use("/", function (err: Error, req: express.Request, res: express.Response, next: express.NextFunction) {
+//G.  Gestione degli errori
+app.use(
+  "/",
+  function (
+    err: Error,
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+  ) {
+    //  err.stack mi indica l'elenco completo degli errori
+    //  err.message è il messaggio riassuntivo dell'errore
     res.status(500).send(err.message);
-    console.log("******** ERRORE ********:\n" + err.stack);
-});
-
-// ────────────────────────────────────────────────────────────────────────────
-// Funzioni helper
-// ────────────────────────────────────────────────────────────────────────────
+    console.log("******** ERRORE ********: \n" + err.stack);
+  },
+);
 
 function createToken(data: any) {
-    const now = Math.floor(new Date().getTime() / 1000);
-    const payload = {
-        _id:      data._id,
-        username: data.username,
-        isAdmin:  data.isAdmin || false,
-        iat:      data.iat || now,
-        exp:      now + parseInt(process.env.DURATA_TOKEN!),
+  // Con .getTime() ho il tempo di ora espresso in timestampsUnix in millisecondi
+  // la procedura che crea il token vuole il timestampsUnix in secondi quindi faccio diviso 1000
+
+  const now = Math.floor(new Date().getTime() / 1000);
+  const payload = {
+    _id: data._id,
+    username: data.username,
+    iat: data.iat || now,
+    exp: now + parseInt(process.env.DURATA_TOKEN!),
+  };
+  const token = jwt.sign(payload, jwtKey);
+  console.log("Creato nuovo TOKEN", token);
+  return token;
+}
+
+function sendGmail(email: string, password: string) {
+  let message = fs.readFileSync("./message.html", "utf-8");
+  message = message.replace("__user", email);
+  message = message.replace("__password", password);
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: googleOAuth,
+  });
+  const mailOptions = {
+    from: googleOAuth.User,
+    to: email,
+    subject: "Nuovo account Rilievi e Perizie",
+    html: message,
+    attachments: [{ filename: "qrCode.png", path: "./qrCode.png" }],
+  };
+  transporter.sendMail(mailOptions, function (err, info) {
+    if (err) {
+      console.log(err.stack);
+    } else {
+      console.log(info);
+      transporter.close();
+    }
+  });
+}
+
+// ##### Socket #####
+// httpsServer è il server https su cui il socket va ad appoggiarsi, cors è la configurazione dei cors per il socket
+
+// i docminic he sono abilitati a fare richeste al server http possono essere abilitati anche al socket
+// non posso abilitare al socket dei domini che non sono abilitati al server http
+// è possibile però abilitare dei domini al server http e alcuni domini al socket (es. se voglio che il socket sia accessibile solo da localhost e non da altri domini)
+// i domini del websocket sono un sottoinsieme dei domini del server http, non possono essere più di quelli del server http
+
+const webSocketServer = new Server(httpsServer, {
+  cors: { origin: "*" },
+});
+// Vettore utenti per ogni stanza
+const roomUsers: Record<string, string[]> = {};
+
+webSocketServer.on("connection", function (connection) {
+  let user: any = {};
+
+  connection.on("JoinRoom", async function (strUser: string) {
+    user = JSON.parse(strUser);
+    connection.join(user.room);
+
+    if (!roomUsers[user.room]) {
+      roomUsers[user.room] = [];
+    }
+    roomUsers[user.room]!.push(user.username);
+
+    const altriUtenti = roomUsers[user.room]!.filter(
+      (u: string) => u !== user.username,
+    );
+    connection.emit("JoinRoomAck", JSON.stringify(altriUtenti));
+
+    connection.to(user.room).emit("UserJoined", user.username);
+
+    // Salva data e ora dell'ultimo accesso dell'utente nel db
+    // $set crea il campo automaticamente se non esiste
+    try {
+      const client = new MongoClient(connectionString!);
+      await client.connect();
+      const collection = client.db(dbName).collection("mails");
+      // Cerca sia username esatto ("jacopo") sia email completa ("jacopo@...")
+      const result = await collection.updateOne(
+        { username: { $regex: new RegExp("^" + user.username + "(@|$)") } },
+        { $set: { ultimoAccesso: new Date() } },
+      );
+      console.log(
+        "Update ultimo accesso:",
+        user.username,
+        "matchedCount:",
+        result.matchedCount,
+        "modifiedCount:",
+        result.modifiedCount,
+      );
+      await client.close();
+    } catch (err) {
+      console.log("Errore salvataggio ultimo accesso:", err);
+    }
+  });
+
+  // Evento uscita volontaria dalla stanza (pulsante "Esci dalla Stanza")
+  connection.on("LeaveRoom", function () {
+    if (user.room && roomUsers[user.room]) {
+      // Rimuove l'utente dal vettore della stanza
+      roomUsers[user.room] = roomUsers[user.room]!.filter(
+        (u: string) => u !== user.username,
+      );
+      // Notifica tutti gli utenti rimasti nella stanza che l'utente è uscito
+      connection.to(user.room).emit("UserLeft", user.username);
+      // Fa uscire il socket dalla room
+      connection.leave(user.room);
+      console.log(`${user.username} ha lasciato la stanza ${user.room}`);
+    }
+  });
+
+  /*
+1)il server nel momento in cui un utente accede ad una stanza, memorizza le informazioni dell'utente(solo il username)
+all'interno di un apposito vettore (uno per ogni stanza)
+
+2)dopo aver immesso l'utente nella stanza, il server restituisce al client il vettore degli utenti al momento presenti all'interno della stanza (utente corrente escluso)
+
+
+3)in corrispondenza dell'ok del client, prima della sezione preposta alla visualizzazione dei messaggi, inserire una sezione aggiuntiva
+(semplice tag div) in cui visualizza nome e immagine di tutti gli utenti presenti all'interno della stanza(utente corrente escluso)
+
+
+
+dal momento che gli utenti già presenti non si acccorgono dell'ingresso del nuovo utente
+aggiungere una utility tale per cui, quando un nuovo utente entra, il server invia a tutti gli
+utenti di quella stanza (utente corrente escluso) un apposito messaggio contenente username dell'utente appena entrato, in modo da farlo sapere
+a tutti, poi aggiornare i banner
+
+quando un utente esce tramite il pulsante esci dalla stanza, il client invia un messaggio di uscita in corrispondenza del quale il server elimina l'utente
+dalla lista degli utenti di quella stanza e invia a tutti gli utenti il messaggio che gli dice lo username di chi è uscito,
+in modo che possano aggiornare in tempo reale il loro banner degli utenti
+
+
+
+salvare data e ora dell'ultimo accesso dell'utente in una stanza qualsiasi, nel caso non ci sia il campo, esso viene creato automaticamente
+
+
+
+
+		<button type="button"
+				class="btn btn-link mt-0 p-0"
+				id="btnPasswordDimenticata">
+			cambia password  
+		</button>			
+  del click su cambio Password 
+(pagina di login) inviare una richiesta al server di registrazione della nuova password scelta dall'utente corrente
+aggiornare sia campo oldPass con la nuova scritta in chiaro sia il campo password con la nuova cifrata in bcrypt
+*/
+
+  connection.on("TxtMessage", async function (message: string) {
+    const response = {
+      from: user.username,
+      body: message,
+      date: new Date(),
     };
-    const token = jwt.sign(payload, jwtKey);
-    console.log("Creato nuovo TOKEN per:", payload.username);
-    return token;
-}
+    webSocketServer
+      .to(user.room)
+      .emit("NotifyMessage", JSON.stringify(response));
 
-function generaPassword(): string {
-    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$";
-    let pwd = "";
-    for (let i = 0; i < 10; i++)
-        pwd += chars[Math.floor(Math.random() * chars.length)];
-    return pwd;
-}
+    const client = new MongoClient(connectionString!);
+    await client.connect();
+    const collection = client.db(dbName).collection(user.room);
+    await collection.insertOne(response);
+    await client.close();
+  });
 
-async function inviaMail(destinatario: string, password: string): Promise<void> {
-    const googleOAuth = JSON.parse(process.env.googleOAuth!);
-    const transporter = nodemailer.createTransport({
-        service: "gmail",
-        auth: googleOAuth,
-    });
-    await transporter.sendMail({
-        from:    `"Rilievi e Perizie" <${googleOAuth.user}>`,
-        to:      destinatario,
-        subject: "Le tue credenziali di accesso",
-        html:    `<p>Benvenuto!</p><p><b>Username:</b> ${destinatario}<br><b>Password:</b> ${password}</p>`,
-    });
-}
+  connection.on("askDataRoom", async function (room: string) {
+    const client = new MongoClient(connectionString!);
+    await client.connect();
+    const collection = client.db(dbName).collection(room);
+    const messaggi = await collection.find({}).toArray();
+    await client.close();
 
-function uploadToCloudinary(buffer: Buffer): Promise<{ url: string; publicId: string }> {
-    return new Promise((resolve, reject) => {
-        const stream = cloudinary.uploader.upload_stream(
-            { folder: "rilievi_perizie", transformation: [{ width: 1200, height: 1200, crop: "limit", quality: "auto" }] },
-            (error, result) => {
-                if (error || !result) return reject(error);
-                resolve({ url: result.secure_url, publicId: result.public_id });
-            }
-        );
-        Readable.from(buffer).pipe(stream);
-    });
-}
+    connection.emit("dataRoom", JSON.stringify(messaggi));
+    // connection.emit("utenteConnesso",roomUsers[room]);
+    console.log("l'utente si è connesso alla room" + room);
+  });
+
+  connection.on("disconnect", function () {
+    console.log(`${user.username} disconnected`);
+    // Rimuove l'utente dal vettore della stanza al momento della disconnessione
+    if (user.room && roomUsers[user.room]) {
+      roomUsers[user.room] = roomUsers[user.room]!.filter(
+        (u: string) => u !== user.username,
+      );
+      // Notifica tutti gli utenti rimasti nella stanza
+      connection.to(user.room).emit("UserLeft", user.username);
+    }
+  });
+});
+
+//il server, sempre al momento dell'accesso di un nuovo utente, provvede a salvare nel DB la data e ora
+//dell'ultimo accesso dell'utente. Se il campo non esiste viene creato automaticamente
