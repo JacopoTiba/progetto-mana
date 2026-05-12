@@ -1,0 +1,51 @@
+<div class="container mt-4">
+    <!-- SEND MAIL -->
+    <div id="frmInvia">
+
+        <div class="row g-3 align-items-end">
+
+            <!-- TO -->
+            <div class="col-md-3">
+                <label for="txtTo" class="form-label">TO:</label>
+                <input type="text" class="form-control" id="txtTo" placeholder="Enter Recipient">
+            </div>
+
+            <!-- SUBJECT -->
+            <div class="col-md-3">
+                <label for="txtSubject" class="form-label">Subject:</label>
+                <input type="text" class="form-control" id="txtSubject" placeholder="Enter Subject">
+            </div>
+
+            <!-- MESSAGE -->
+            <div class="col-md-5">
+                <label for="txtMessage" class="form-label">Message:</label>
+                <textarea type="text" class="form-control" rows="1" id="txtMessage"
+                    placeholder="Enter message"></textarea>
+            </div>
+
+            <!-- BUTTON -->
+            <div class="col-md-1 d-grid">
+                <button type="button" class="btn btn-secondary" id="btnInvia">
+                    Invia
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+
+    <!-- ELENCO MAIL -->
+    <div class="table-responsive mt-3">
+        <table class="table table-hover align-middle" id="tabMail">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:16.5%">From</th>
+                    <th style="width:16.5%">Subject</th>
+                    <th style="width:67%">Body</th>
+                </tr>
+            </thead>
+            <tbody>
+            </tbody>
+        </table>
+    </div>
+</div>

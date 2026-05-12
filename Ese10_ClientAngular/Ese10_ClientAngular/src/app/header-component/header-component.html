@@ -1,0 +1,58 @@
+<div class="container">
+    <div class='row'>
+        <div class="col-sm-12 text-center m-2">
+            <h2 class="m-3">
+                La chat online più accattivante di sempre
+            </h2>
+            <h3 class="m-3">Benvenuto, {{ commonService.username }}!</h3>
+            <img src="img/chat.jpg" class="img-fluid mt-2" style="max-width:460px;">
+        </div>
+
+        <div class="col-sm-12 text-center m-2 mt-0">
+            <fieldset class="border mx-auto p-2 " style="max-width:460px;">
+                <legend class="w-auto"><b>Scegli una Stanza:</b></legend>
+                <div class='row'>
+                    <div class="col-sm-2"></div>
+                    <div class="col-sm-10 text-start" id="divStanze">
+                        <label class="form-check-label p-1 d-flex justify-content-between">
+                            <div>
+                                <!-- Nel caso di un radio button o tag select [(ngModel)] associa la variiabile al value 
+                                 della voce attualemnte selezionata -->
+                                <input type="radio" class="form-check-input me-2" name="radioRoom" value="redRoom"
+                                    id="redRoom" [(ngModel)]="commonService.selectedRoom">
+                                <label for="redRoom">redRoom</label>
+                            </div>
+                        </label>
+
+                        <label class="form-check-label p-1 d-flex  justify-content-between">
+                            <div>
+                                <input type="radio" class="form-check-input me-2" name="radioRoom" value="greenRoom"
+                                    id="greenRoom" [(ngModel)]="commonService.selectedRoom">
+                                <label for="greenRoom">greenRoom</label>
+                            </div>
+                        </label>
+
+                        <label class="form-check-label p-1 d-flex  justify-content-between">
+                            <div>
+                                <input type="radio" class="form-check-input me-2" name="radioRoom" value="blueRoom"
+                                    id="blueRoom" [(ngModel)]="commonService.selectedRoom">
+                                <label for="blueRoom">blueRoom</label>
+                            </div>
+                        </label>
+
+                        <label class="form-check-label p-1 d-flex  justify-content-between">
+                            <div>
+                                <input type="radio" class="form-check-input me-2" name="radioRoom" value="defaultRoom"
+                                    id="defaultRoom" [(ngModel)]="commonService.selectedRoom">
+                                <label for="defaultRoom">defaultRoom</label>
+                            </div>
+                            <button class="btn btn-secondary btn-sm" (click)="entra()">Entra</button>
+                        </label>
+                    </div>
+                </div>
+            </fieldset>
+        </div>
+
+    </div>
+
+</div>

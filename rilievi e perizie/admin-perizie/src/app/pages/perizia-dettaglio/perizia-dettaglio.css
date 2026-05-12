@@ -1,0 +1,14 @@
+#detailMapContainer {
+    width: 100%;
+    height: 300px;
+}
+
+.foto-container {
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.foto-img {
+    max-height: 250px;
+    object-fit: cover;
+}

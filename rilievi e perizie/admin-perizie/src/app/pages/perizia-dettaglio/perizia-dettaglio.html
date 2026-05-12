@@ -1,1 +1,132 @@
-<p>perizia-dettaglio works!</p>
+<app-navbar></app-navbar>
+
+<div class="container mt-3">
+    @if(loading) {
+    <div class="text-center p-5">
+        <div class="spinner-border" role="status"></div>
+        <p class="mt-2">Caricamento perizia...</p>
+    </div>
+    }
+
+    @if(!loading && perizia) {
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <button class="btn btn-outline-secondary" (click)="tornaAllaLista()">
+            <i class="bi bi-arrow-left me-1"></i>Torna alla lista
+        </button>
+        @if(isAdmin) {
+        <button class="btn btn-danger btn-sm" (click)="eliminaPerizia()">
+            <i class="bi bi-trash me-1"></i>Elimina Perizia
+        </button>
+        }
+    </div>
+
+    <div class="row">
+        <!-- Info perizia -->
+        <div class="col-md-6">
+            <div class="card mb-3">
+                <div class="card-header bg-dark text-white">
+                    <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Dettagli Perizia</h5>
+                </div>
+                <div class="card-body">
+                    <p><strong><i class="bi bi-person me-1"></i>Operatore:</strong> {{ perizia.operatore }}</p>
+                    <p><strong><i class="bi bi-calendar me-1"></i>Data:</strong> {{ perizia.dataOra | date:'dd/MM/yyyy HH:mm:ss' }}</p>
+                    <p><strong><i class="bi bi-geo-alt me-1"></i>Coordinate:</strong>
+                        {{ perizia.coordinate?.lat | number:'1.4-4' }},
+                        {{ perizia.coordinate?.lng | number:'1.4-4' }}
+                    </p>
+
+                    <!-- Descrizione -->
+                    <div class="mt-2">
+                        <strong><i class="bi bi-card-text me-1"></i>Descrizione:</strong>
+                        @if(!editDescrizione) {
+                        <p class="mt-1">{{ perizia.descrizione || 'Nessuna descrizione' }}</p>
+                        @if(isAdmin) {
+                        <button class="btn btn-sm btn-outline-primary" (click)="iniziaModificaDescrizione()">
+                            <i class="bi bi-pencil me-1"></i>Modifica
+                        </button>
+                        }
+                        } @else {
+                        <div class="mt-1">
+                            <textarea class="form-control" rows="3" [(ngModel)]="nuovaDescrizione"></textarea>
+                            <div class="mt-1">
+                                <button class="btn btn-sm btn-success me-1" (click)="salvaDescrizione()">
+                                    <i class="bi bi-check me-1"></i>Salva
+                                </button>
+                                <button class="btn btn-sm btn-secondary" (click)="annullaModificaDescrizione()">
+                                    Annulla
+                                </button>
+                            </div>
+                        </div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mini mappa -->
+            @if(perizia.coordinate?.lng && perizia.coordinate?.lat) {
+            <div class="card mb-3">
+                <div class="card-header bg-dark text-white">
+                    <h5 class="mb-0"><i class="bi bi-map me-2"></i>Posizione</h5>
+                </div>
+                <div class="card-body p-0">
+                    <div id="detailMapContainer"></div>
+                </div>
+            </div>
+            }
+        </div>
+
+        <!-- Foto -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-images me-2"></i>Fotografie</h5>
+                    <span class="badge bg-light text-dark">
+                        {{ perizia.fotografie ? perizia.fotografie.length : 0 }}
+                    </span>
+                </div>
+                <div class="card-body foto-container">
+                    @if(perizia.fotografie && perizia.fotografie.length > 0) {
+                    @for(foto of perizia.fotografie; track $index) {
+                    <div class="card mb-2">
+                        <img [src]="foto.url" class="card-img-top foto-img" alt="Foto perizia">
+                        <div class="card-body p-2">
+                            @if(editCommentoIndex !== $index) {
+                            <p class="card-text small">
+                                <i class="bi bi-chat-text me-1"></i>
+                                {{ foto.commento || 'Nessun commento' }}
+                            </p>
+                            @if(isAdmin) {
+                            <button class="btn btn-sm btn-outline-primary" (click)="iniziaModificaCommento($index)">
+                                <i class="bi bi-pencil me-1"></i>Modifica commento
+                            </button>
+                            }
+                            } @else {
+                            <div>
+                                <input type="text" class="form-control form-control-sm" [(ngModel)]="nuovoCommento"
+                                    placeholder="Inserisci commento...">
+                                <div class="mt-1">
+                                    <button class="btn btn-sm btn-success me-1" (click)="salvaCommento($index)">
+                                        <i class="bi bi-check"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-secondary" (click)="annullaModificaCommento()">
+                                        <i class="bi bi-x"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            }
+                        </div>
+                    </div>
+                    }
+                    } @else {
+                    <div class="text-center text-muted p-3">
+                        <i class="bi bi-camera fs-3"></i>
+                        <p>Nessuna fotografia</p>
+                    </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+    }
+</div>

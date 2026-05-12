@@ -165,57 +165,72 @@ app.post("/api/login", async function (req, res, next) {
 app.post("/api/loginWithGoogle", async function (req, res, next) {
   const googleToken = req.body.googleToken;
   const payloadGoogleToken: any = jwt.decode(googleToken);
-  console.log("Google token: ", payloadGoogleToken);
+  const userEmail = payloadGoogleToken.email;
+  console.log("Tentativo Login Google: ", userEmail);
+
+  // Controllo Whitelist su file esterno (come da specifica PDF)
+  try {
+    const data = fs.readFileSync("abilitati.txt", "utf8");
+    const abilitati = data.split(/\r?\n/).map((e) => e.trim().toLowerCase());
+
+    if (!abilitati.includes(userEmail.toLowerCase())) {
+      console.log(`Accesso negato: ${userEmail} non è nella whitelist.`);
+      res.status(403).send("Utente non abilitato. Contatta l'amministratore.");
+      return;
+    }
+  } catch (err) {
+    console.error("Errore lettura file abilitati.txt:", err);
+    res
+      .status(500)
+      .send("Errore interno del server (configurazione whitelist)");
+    return;
+  }
 
   const client = new MongoClient(connectionString!);
   await client.connect().catch(function (err) {
     res.status(503).send("Errore di connessione al Database");
     return;
   });
+
   const collection = client.db(dbName).collection("utenti");
-  const cmd = collection.findOne({ username: payloadGoogleToken.email });
-  cmd.catch(function (err) {
-    res.status(500).send("Errore esecuzione query: " + err);
-    client.close();
-  });
-  cmd.then(function (dbUser) {
-    if (!dbUser) {
-      // Utente non registrato: lo creiamo automaticamente
-      let password: string = "";
-      for (let i = 0; i < 10; i++) {
-        password += String.fromCharCode(Math.floor(Math.random() * 26) + 65);
-      }
+  const dbUser = await collection.findOne({ username: userEmail });
 
-      const newUser: any = {
-        username: payloadGoogleToken.email,
-        password: bcrypt.hashSync(password, 10),
-        info: {
-          nome: payloadGoogleToken.given_name || "",
-          cognome: payloadGoogleToken.family_name || "",
-        },
-      };
-
-      const cmd2 = collection.insertOne(newUser);
-      cmd2.catch(function (err) {
-        res.status(500).send("Errore esecuzione query: " + err);
-      });
-      cmd2.then(function (MongoResponse) {
-        newUser._id = MongoResponse.insertedId.toString();
-        sendGmail(payloadGoogleToken.email, password);
-        let token = createToken(newUser);
-        res.cookie("TOKEN", token, cookiesOptions);
-        res.send({ username: payloadGoogleToken.email });
-      });
-      cmd2.finally(function () {
-        client.close();
-      });
-    } else {
-      let token = createToken(dbUser);
-      res.cookie("TOKEN", token, cookiesOptions);
-      res.send({ username: payloadGoogleToken.email });
-      client.close();
+  if (!dbUser) {
+    // Utente abilitato ma non ancora nel DB: lo creiamo
+    console.log(`Primo accesso per ${userEmail}, creazione profilo...`);
+    let password: string = ""; // Password randomica (non verrà usata per login google)
+    for (let i = 0; i < 10; i++) {
+      password += String.fromCharCode(Math.floor(Math.random() * 26) + 65);
     }
-  });
+
+    const newUser: any = {
+      username: userEmail,
+      password: bcrypt.hashSync(password, 10),
+      info: {
+        nome: payloadGoogleToken.given_name || "",
+        cognome: payloadGoogleToken.family_name || "",
+      },
+    };
+
+    const result = await collection.insertOne(newUser);
+    newUser._id = result.insertedId.toString();
+
+    // Per Google il token ha durata lunga (es. 1 anno = 31536000 secondi)
+    const LONG_EXPIRY = 31536000;
+    const token = createToken(newUser, LONG_EXPIRY);
+
+    const longCookieOptions = { ...cookiesOptions, maxAge: LONG_EXPIRY * 1000 };
+    res.cookie("TOKEN", token, longCookieOptions);
+    res.send({ username: userEmail });
+  } else {
+    // Utente già presente e abilitato
+    const LONG_EXPIRY = 31536000;
+    const token = createToken(dbUser, LONG_EXPIRY);
+    const longCookieOptions = { ...cookiesOptions, maxAge: LONG_EXPIRY * 1000 };
+    res.cookie("TOKEN", token, longCookieOptions);
+    res.send({ username: userEmail });
+  }
+  await client.close();
 });
 
 // =============================================
@@ -595,13 +610,14 @@ app.use(
 // FUNZIONI UTILITY
 // =============================================
 
-function createToken(data: any) {
+function createToken(data: any, customExpiry?: number) {
   const now = Math.floor(new Date().getTime() / 1000);
+  const expiry = customExpiry || parseInt(process.env.DURATA_TOKEN!);
   const payload = {
     _id: data._id,
     username: data.username,
     iat: data.iat || now,
-    exp: now + parseInt(process.env.DURATA_TOKEN!),
+    exp: now + expiry,
   };
   const token = jwt.sign(payload, jwtKey);
   console.log("Creato nuovo TOKEN", token);

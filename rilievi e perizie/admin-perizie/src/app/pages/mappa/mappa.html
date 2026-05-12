@@ -1,1 +1,84 @@
-<p>mappa works!</p>
+<app-navbar></app-navbar>
+
+<div class="container-fluid mt-3">
+    <div class="row">
+        <!-- Colonna sinistra: Lista perizie -->
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-clipboard2-check me-2"></i>Perizie</h5>
+                    <span class="badge bg-light text-dark">{{ perizieList.length }}</span>
+                </div>
+                <div class="card-body p-2">
+                    <!-- Filtro operatore -->
+                    <div class="input-group input-group-sm mb-2">
+                        <input type="text" class="form-control" placeholder="Filtra per operatore..."
+                            [(ngModel)]="filtroOperatore" (keyup.enter)="filtra()">
+                        <button class="btn btn-outline-secondary" (click)="filtra()">
+                            <i class="bi bi-search"></i>
+                        </button>
+                        @if(filtroOperatore) {
+                        <button class="btn btn-outline-danger" (click)="resetFiltro()">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                        }
+                    </div>
+
+                    <!-- Lista -->
+                    <div class="perizie-list">
+                        @if(loading) {
+                        <div class="text-center p-3">
+                            <div class="spinner-border spinner-border-sm" role="status"></div>
+                            <span class="ms-2">Caricamento...</span>
+                        </div>
+                        }
+                        @for(perizia of perizieList; track perizia._id) {
+                        <div class="perizia-item card mb-2" (click)="vaiDettaglio(perizia._id)"
+                            style="cursor: pointer;">
+                            <div class="card-body p-2">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <strong>
+                                            <i class="bi bi-person me-1"></i>{{ perizia.operatore }}
+                                        </strong>
+                                        <br>
+                                        <small class="text-muted">
+                                            <i class="bi bi-calendar me-1"></i>
+                                            {{ perizia.dataOra | date:'dd/MM/yyyy HH:mm' }}
+                                        </small>
+                                    </div>
+                                    <span class="badge bg-secondary">
+                                        <i class="bi bi-camera me-1"></i>
+                                        {{ perizia.fotografie ? perizia.fotografie.length : 0 }}
+                                    </span>
+                                </div>
+                                @if(perizia.descrizione) {
+                                <p class="mb-0 mt-1 small text-truncate">{{ perizia.descrizione }}</p>
+                                }
+                            </div>
+                        </div>
+                        }
+                        @if(!loading && perizieList.length === 0) {
+                        <div class="text-center text-muted p-3">
+                            <i class="bi bi-inbox fs-3"></i>
+                            <p>Nessuna perizia trovata</p>
+                        </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Colonna destra: Mappa -->
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header bg-dark text-white">
+                    <h5 class="mb-0"><i class="bi bi-map me-2"></i>Mappa Perizie</h5>
+                </div>
+                <div class="card-body p-0">
+                    <div id="mapContainer"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
