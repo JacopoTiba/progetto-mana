@@ -363,8 +363,11 @@ app.get("/api/perizie", async function (req: any, res, next) {
 
     let filtro: any = {};
     // Se viene passato un parametro "operatore", filtriamo per quell'utente
-    if (req["parsedQuery"] && req["parsedQuery"].operatore) {
-      filtro.operatore = req["parsedQuery"].operatore;
+    if (req["parsedQuery"]?.operatore) {
+      filtro.operatore = {
+        $regex: req["parsedQuery"].operatore,
+        $options: "i"
+      };
     }
 
     const perizie = await collection.find(filtro).toArray();

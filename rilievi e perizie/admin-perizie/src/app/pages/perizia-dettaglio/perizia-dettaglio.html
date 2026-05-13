@@ -30,7 +30,8 @@
                 </div>
                 <div class="card-body">
                     <p><strong><i class="bi bi-person me-1"></i>Operatore:</strong> {{ perizia.operatore }}</p>
-                    <p><strong><i class="bi bi-calendar me-1"></i>Data:</strong> {{ perizia.dataOra | date:'dd/MM/yyyy HH:mm:ss' }}</p>
+                    <p><strong><i class="bi bi-calendar me-1"></i>Data:</strong> {{ perizia.dataOra | date:'dd/MM/yyyy
+                        HH:mm:ss' }}</p>
                     <p><strong><i class="bi bi-geo-alt me-1"></i>Coordinate:</strong>
                         {{ perizia.coordinate?.lat | number:'1.4-4' }},
                         {{ perizia.coordinate?.lng | number:'1.4-4' }}
