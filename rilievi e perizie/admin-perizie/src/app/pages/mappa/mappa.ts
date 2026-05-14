@@ -10,71 +10,72 @@ import { FormsModule } from '@angular/forms';
 import { DatePipe } from '@angular/common';
 
 @Component({
-    selector: 'app-mappa',
-    imports: [Navbar, FormsModule, DatePipe],
-    templateUrl: './mappa.html',
-    styleUrl: './mappa.css',
+  selector: 'app-mappa',
+  imports: [Navbar, FormsModule, DatePipe],
+  templateUrl: './mappa.html',
+  styleUrl: './mappa.css',
 })
 export class Mappa implements OnInit, OnDestroy {
-    public authService: Auth = inject(Auth);
-    private perizieService: Perizie = inject(Perizie);
-    public mapService: MapService = inject(MapService);
-    private router: Router = inject(Router);
+  public authService: Auth = inject(Auth);
+  private perizieService: Perizie = inject(Perizie);
+  public mapService: MapService = inject(MapService);
+  private router: Router = inject(Router);
 
-    public perizieList: any[] = [];
-    public filtroOperatore: string = "";
-    public loading: boolean = false;
+  public perizieList: any[] = [];
+  public filtroOperatore: string = '';
+  public loading: boolean = false;
 
-    ngOnInit() {
-        if (!this.authService.username) {
-            this.router.navigate(["login"]);
-            return;
+  ngOnInit() {
+    if (!this.authService.username) {
+      this.router.navigate(['login']);
+      return;
+    }
+    this.caricaPerizie();
+  }
+
+  ngOnDestroy() {
+    if (this.mapService.map != null) {
+      this.mapService.map = null;
+    }
+  }
+  caricaPerizie() {
+    this.loading = true;
+    const filtro = this.filtroOperatore || undefined;
+    this.perizieService.getPerizie(filtro).subscribe({
+      next: (data: any) => {
+        this.perizieList = data;
+        this.loading = false;
+        // Inizializza la mappa dopo aver caricato le perizie
+        setTimeout(() => this.inizializzaMappa(), 100);
+      },
+      error: (err: any) => {
+        this.loading = false;
+        if (err.status === 403) {
+          alert('Sessione scaduta, ripeti il login');
+          this.router.navigate(['login']);
+        } else {
+          alert('Errore nel caricamento delle perizie: ' + err.error);
         }
-        this.caricaPerizie();
-    }
+      },
+    });
+  }
 
-    ngOnDestroy() {
-        this.mapService.destroyMap();
-    }
+  async inizializzaMappa() {
+    // Centro di default: Italia
+    const defaultCenter: [number, number] = [12.4964, 41.9028]; // Roma
+    const style = this.mapService.neutralStyle;
 
-    caricaPerizie() {
-        this.loading = true;
-        const filtro = this.filtroOperatore || undefined;
-        this.perizieService.getPerizie(filtro).subscribe({
-            next: (data: any) => {
-                this.perizieList = data;
-                this.loading = false;
-                // Inizializza la mappa dopo aver caricato le perizie
-                setTimeout(() => this.inizializzaMappa(), 100);
-            },
-            error: (err: any) => {
-                this.loading = false;
-                if (err.status === 403) {
-                    alert("Sessione scaduta, ripeti il login");
-                    this.router.navigate(["login"]);
-                } else {
-                    alert("Errore nel caricamento delle perizie: " + err.error);
-                }
-            }
-        });
-    }
+    try {
+      await this.mapService.drawMap(style, 'mapContainer', defaultCenter, 6);
 
-    async inizializzaMappa() {
-        // Centro di default: Italia
-        const defaultCenter: [number, number] = [12.4964, 41.9028]; // Roma
-        const style = this.mapService.neutralStyle;
+      // Aggiungi marker per ogni perizia
+      const coordinates: [number, number][] = [];
+      for (const perizia of this.perizieList) {
+        if (perizia.coordinate && perizia.coordinate.lng && perizia.coordinate.lat) {
+          const center: [number, number] = [perizia.coordinate.lng, perizia.coordinate.lat];
+          coordinates.push(center);
 
-        try {
-            await this.mapService.drawMap(style, 'mapContainer', defaultCenter, 6);
-
-            // Aggiungi marker per ogni perizia
-            const coordinates: [number, number][] = [];
-            for (const perizia of this.perizieList) {
-                if (perizia.coordinate && perizia.coordinate.lng && perizia.coordinate.lat) {
-                    const center: [number, number] = [perizia.coordinate.lng, perizia.coordinate.lat];
-                    coordinates.push(center);
-
-                    const popupHTML = `
+          const popupHTML = `
                         <div>
                             <strong>${perizia.operatore}</strong><br>
                             <small>${new Date(perizia.dataOra).toLocaleDateString('it-IT')}</small><br>
@@ -82,35 +83,30 @@ export class Mappa implements OnInit, OnDestroy {
                             <small>${perizia.fotografie ? perizia.fotografie.length : 0} foto</small>
                         </div>
                     `;
-                    const marker = this.mapService.addMarker(center, popupHTML);
+          const marker = this.mapService.addMarker(center, popupHTML);
 
-                    // Click sul marker -> dettaglio perizia
-                    marker.getElement().addEventListener('click', () => {
-                        this.router.navigate(["perizia", perizia._id]);
-                    });
-                }
-            }
-
-            // Adatta zoom per mostrare tutti i marker
-            if (coordinates.length > 0) {
-                this.mapService.fitBounds(coordinates);
-            }
-        } catch (err) {
-            console.error("Errore inizializzazione mappa:", err);
+          // Click sul marker -> dettaglio perizia
+          marker.getElement().addEventListener('click', () => {
+            this.router.navigate(['perizia', perizia._id]);
+          });
         }
+      }
+    } catch (err) {
+      console.error('Errore inizializzazione mappa:', err);
     }
+  }
 
-    filtra() {
-        this.mapService.destroyMap();
-        this.caricaPerizie();
-    }
+  filtra() {
+    this.mapService.destroyMap();
+    this.caricaPerizie();
+  }
 
-    resetFiltro() {
-        this.filtroOperatore = "";
-        this.filtra();
-    }
+  resetFiltro() {
+    this.filtroOperatore = '';
+    this.filtra();
+  }
 
-    vaiDettaglio(periziaId: string) {
-        this.router.navigate(["perizia", periziaId]);
-    }
+  vaiDettaglio(periziaId: string) {
+    this.router.navigate(['perizia', periziaId]);
+  }
 }

@@ -41,7 +41,9 @@ export class PeriziaDettaglio implements OnInit, OnDestroy {
   }
 
   ngOnDestroy() {
-    this.mapService.destroyMap();
+    if (this.mapService.map != null) {
+      this.mapService.map = null;
+    }
   }
 
   caricaPerizia(id: string) {
