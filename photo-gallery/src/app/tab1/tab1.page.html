@@ -1,0 +1,88 @@
+<ion-header [translucent]="true">
+  <ion-toolbar color="primary">
+    <ion-title>🔐 Rilievi e Perizie</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true" class="ion-padding">
+
+  <!-- STATO: Non loggato -->
+  @if (!isLoggedIn) {
+    <div class="login-container">
+      <ion-card>
+        <ion-card-header>
+          <ion-card-title>Login Operatore</ion-card-title>
+        </ion-card-header>
+        <ion-card-content>
+          <ion-item>
+            <ion-label position="stacked">Username</ion-label>
+            <ion-input
+              [(ngModel)]="username"
+              type="text"
+              placeholder="Inserisci username"
+              (keyup.enter)="doLogin()">
+            </ion-input>
+          </ion-item>
+          <ion-item class="ion-margin-top">
+            <ion-label position="stacked">Password</ion-label>
+            <ion-input
+              [(ngModel)]="password"
+              type="password"
+              placeholder="Inserisci password"
+              (keyup.enter)="doLogin()">
+            </ion-input>
+          </ion-item>
+
+          @if (errore) {
+            <ion-text color="danger">
+              <p class="ion-padding-start ion-margin-top">{{ errore }}</p>
+            </ion-text>
+          }
+
+          <ion-button
+            expand="block"
+            class="ion-margin-top"
+            (click)="doLogin()"
+            [disabled]="loading">
+            @if (loading) {
+              <ion-spinner name="crescent"></ion-spinner>
+            } @else {
+              Accedi
+            }
+          </ion-button>
+        </ion-card-content>
+      </ion-card>
+    </div>
+  }
+
+  <!-- STATO: Loggato -->
+  @if (isLoggedIn) {
+    <div class="logged-container">
+
+      <!-- Card profilo -->
+      <ion-card>
+        <ion-card-header>
+          <ion-card-title>✅ Accesso effettuato</ion-card-title>
+        </ion-card-header>
+        <ion-card-content>
+          <p><strong>Operatore:</strong> {{ currentUser }}</p>
+          <p class="ion-margin-top">
+            Vai alla tab <strong>📷 Foto</strong> per scattare le immagini della perizia,
+            poi usa la tab <strong>📤 Upload</strong> per inviarle al server.
+          </p>
+          <ion-button
+            expand="block"
+            color="medium"
+            class="ion-margin-top"
+            (click)="doLogout()">
+            Logout
+          </ion-button>
+        </ion-card-content>
+      </ion-card>
+
+
+
+    </div>
+  }
+
+</ion-content>

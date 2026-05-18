@@ -1,0 +1,100 @@
+<ion-header [translucent]="true">
+  <ion-toolbar color="primary">
+    <ion-title>📤 Invia Perizia</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true" class="ion-padding">
+
+  <!-- Non loggato -->
+  @if (!isLoggedIn) {
+    <ion-card color="warning">
+      <ion-card-content>
+        <p><strong>⚠️ Non sei loggato!</strong></p>
+        <p>Vai alla tab "Login" per autenticarti prima di inviare una perizia.</p>
+      </ion-card-content>
+    </ion-card>
+  }
+
+  <!-- Form perizia -->
+  @if (isLoggedIn) {
+    <ion-card>
+      <ion-card-header>
+        <ion-card-title>Nuova Perizia</ion-card-title>
+      </ion-card-header>
+      <ion-card-content>
+
+        <!-- Foto conteggiate -->
+        <p>
+          Foto pronte per l'upload:
+          <ion-badge [color]="fotografie.length > 0 ? 'primary' : 'medium'">
+            {{ fotografie.length }}
+          </ion-badge>
+        </p>
+        @if (fotografie.length === 0) {
+          <p><small><em>Scatta foto dalla tab 📷 Foto prima di inviare.</em></small></p>
+        }
+
+        <!-- Descrizione perizia -->
+        <ion-item class="ion-margin-top">
+          <ion-label position="stacked">Descrizione perizia *</ion-label>
+          <ion-textarea
+            [(ngModel)]="descrizione"
+            placeholder="Descrivi la perizia: tipo di danno, luogo, condizioni..."
+            rows="4"
+            [disabled]="loading">
+          </ion-textarea>
+        </ion-item>
+
+        <p class="ion-padding-start">
+          <small><ion-icon name="location-outline"></ion-icon>
+            Le coordinate GPS verranno rilevate automaticamente al momento dell'invio.
+          </small>
+        </p>
+
+        <!-- Barra di progresso durante upload -->
+        @if (loading) {
+          <div class="progress-section ion-margin-top">
+            <p>Upload in corso... ({{ progressoFoto }}/{{ totaleFoto }} foto)</p>
+            <ion-progress-bar [value]="progressoPercentuale"></ion-progress-bar>
+          </div>
+        }
+
+        <!-- Feedback stato -->
+        @if (stato === 'successo') {
+          <div class="ion-margin-top">
+            <ion-text color="success">
+              <p><ion-icon name="checkmark-circle"></ion-icon> {{ messaggioStato }}</p>
+            </ion-text>
+          </div>
+        }
+        @if (stato === 'errore') {
+          <div class="ion-margin-top">
+            <ion-text color="danger">
+              <p><ion-icon name="alert-circle"></ion-icon> {{ messaggioStato }}</p>
+            </ion-text>
+          </div>
+        }
+
+        <!-- Pulsanti azione -->
+        <div class="btn-group ion-margin-top">
+          <!-- Invia / Pubblica -->
+          <ion-button
+            expand="block"
+            color="primary"
+            (click)="uploadPerizia()"
+            [disabled]="loading">
+            @if (loading) {
+              <ion-spinner name="crescent"></ion-spinner>&nbsp; Invio in corso...
+            } @else {
+              <ion-icon name="cloud-upload" slot="start"></ion-icon>
+              Invia Perizia al Server
+            }
+          </ion-button>
+        </div>
+
+      </ion-card-content>
+    </ion-card>
+  }
+
+</ion-content>

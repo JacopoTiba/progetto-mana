@@ -1,0 +1,43 @@
+<ion-header [translucent]="true">
+  <ion-toolbar color="primary">
+    <ion-title>📷 Foto Perizia</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true">
+
+  @if (photoService.photos.length === 0) {
+    <div class="empty-state">
+      <p>Nessuna foto ancora.</p>
+      <p>Clicca il bottone 📷 per iniziare a scattare.</p>
+    </div>
+  }
+
+  <ion-grid>
+    <ion-row>
+      @for (item of photoService.photos; track $index) {
+        <ion-col size="6">
+          <div class="photo-wrapper" (click)="showActionSheet(item, $index)">
+            <ion-img [src]="item.webviewPath"></ion-img>
+            @if (item.commento) {
+              <div class="photo-comment">
+                <small>💬 {{ item.commento }}</small>
+              </div>
+            } @else {
+              <div class="photo-comment no-comment">
+                <small>Nessun commento</small>
+              </div>
+            }
+          </div>
+        </ion-col>
+      }
+    </ion-row>
+  </ion-grid>
+
+  <ion-fab vertical="bottom" horizontal="center" slot="fixed">
+    <ion-fab-button (click)="addPhotoToGallery()">
+      <ion-icon name="camera"></ion-icon>
+    </ion-fab-button>
+  </ion-fab>
+
+</ion-content>

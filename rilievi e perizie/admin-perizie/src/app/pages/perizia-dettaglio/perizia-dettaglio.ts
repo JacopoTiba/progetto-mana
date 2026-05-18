@@ -29,6 +29,9 @@ export class PeriziaDettaglio implements OnInit, OnDestroy {
   public editCommentoIndex: number = -1;
   public nuovoCommento: string = '';
   public isAdmin: boolean = false;
+  public percorsoDuration: number = 0;
+  public percorsoDistance: number = 0;
+  public periziaIndirizzo: string = '';
 
   ngOnInit() {
     if (!this.authService.username) {
@@ -74,9 +77,25 @@ export class PeriziaDettaglio implements OnInit, OnDestroy {
   async inizializzaMappa() {
     const center: [number, number] = [this.perizia.coordinate.lng, this.perizia.coordinate.lat];
     try {
+      // Reverse Geocoding per ottenere l'indirizzo dalle coordinate
+      const geocodeResult = await this.mapService.geocode(this.perizia.coordinate.lng, this.perizia.coordinate.lat);
+      if (geocodeResult) {
+        this.periziaIndirizzo = geocodeResult.place_name;
+      }
+
       await this.mapService.drawMap(this.mapService.neutralStyle, 'detailMapContainer', center, 14);
-      const popupHTML = `<b>${this.perizia.operatore}</b><br><small>${this.perizia.descrizione || ''}</small>`;
-      this.mapService.addMarker(center, popupHTML);
+      const popupHTML = `<b>${this.perizia.operatore}</b><br><small>${this.periziaIndirizzo || this.perizia.descrizione || ''}</small>`;
+      this.mapService.addMarker(center, '', '', popupHTML);
+
+      // Se l'utente è ADMIN, calcola il percorso dalla sede
+      if (this.isAdmin) {
+        // Usiamo l'indirizzo testuale della sede
+        const routeData = await this.mapService.drawSingleRoute(this.mapService.OFFICE_ADDRESS, center);
+        if (routeData) {
+          this.percorsoDuration = routeData.duration; // in secondi
+          this.percorsoDistance = routeData.distance; // in metri
+        }
+      }
     } catch (err) {
       console.error('Errore mappa dettaglio:', err);
     }

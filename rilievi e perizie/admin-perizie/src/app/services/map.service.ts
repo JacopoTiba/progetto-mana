@@ -8,6 +8,7 @@ import { AjaxService } from './ajax.service';
 })
 export class MapService {
   API_KEY = 'AVXt2UV4vFU23b3AwPbF';
+  OFFICE_ADDRESS = 'Via San Michele 68, Fossano, Italia';
   private ajax: AjaxService = inject(AjaxService);
 
   neutralStyle = 'https://api.maptiler.com/maps/streets-v2/style.json?key=';
@@ -199,7 +200,7 @@ export class MapService {
   }
   destroyMap() {
     this.map!.remove();
-
+    this.map = null;
   }
   async drawSingleRoute(fromAddress: any, toAddress: any, color = '#3887be', profile = 'driving') {
     const startAddress = await this.geocode(fromAddress);

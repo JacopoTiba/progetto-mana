@@ -50,9 +50,25 @@ const certificate = fs.readFileSync("keys/certificate.crt", "utf8");
 const credentials = { key: privateKey, cert: certificate };
 const jwtKey = fs.readFileSync("keys/jwtKey", "utf-8");
 
+// CONFIGURAZIONE ORIGINALE (Commentata per test da telefono)
+/*
 let httpsServer = https.createServer(credentials, app);
 httpsServer.listen(HTTPS_PORT, function () {
   console.log("Server in ascolto sulla porta HTTPS: " + HTTPS_PORT);
+});
+*/
+
+// NUOVA CONFIGURAZIONE PER TEST DA TELEFONO
+// Creazione ed avvio del server http (per il telefono)
+let httpServer = http.createServer(app);
+httpServer.listen(parseInt(process.env.PORT!), "0.0.0.0", function () {
+  console.log("Server HTTP in ascolto sulla porta: " + process.env.PORT);
+});
+
+// Creazione ed avvio del server https su porta differente
+let httpsServer = https.createServer(credentials, app);
+httpsServer.listen(3001, "0.0.0.0", function () {
+  console.log("Server HTTPS in ascolto sulla porta: 3001");
 });
 
 //D.  Middleware
@@ -90,17 +106,19 @@ const whitelist = [
   "http://localhost:8100",
   "capacitor://localhost",
   "http://localhost",
+  // Nuovi IP per test da telefono
+  "http://192.168.2.193:3000",
+  "http://192.168.2.193",
 ];
 
 let corsOptions = {
   origin: function (origin: any, callback: any) {
-    if (!origin)
-      // browser direct call
-      return callback(null, true);
-    if (whitelist.indexOf(origin) == -1) {
-      let msg = `The CORS policy for this site does not allow access from the specified Origin.`;
-      return callback(new Error(msg), false);
-    } else return callback(null, true);
+    // Permettiamo tutto durante lo sviluppo per sbloccare i test
+    return callback(null, true);
+    // if (whitelist.indexOf(origin) == -1) {
+    //   let msg = `The CORS policy for this site does not allow access from the specified Origin.`;
+    //   return callback(new Error(msg), false);
+    // } else return callback(null, true);
   },
   credentials: true,
 };
@@ -114,9 +132,9 @@ app.use(cookieParser());
 const cookiesOptions: CookieOptions = {
   path: "/",
   httpOnly: true,
-  secure: true,
+  secure: false, // Disabilitato temporaneamente per i test su HTTP dal telefono
   maxAge: parseInt(process.env.DURATA_TOKEN!) * 1000,
-  sameSite: "none",
+  sameSite: "lax", // Necessario se secure è false su alcuni browser
 };
 
 // =============================================
@@ -150,7 +168,7 @@ app.post("/api/login", async function (req, res, next) {
           else {
             const TOKEN = createToken(dbUser);
             res.cookie("TOKEN", TOKEN, cookiesOptions);
-            res.send({ username: dbUser.username });
+            res.send({ username: dbUser.username, token: TOKEN });
           }
         }
       });
@@ -221,14 +239,14 @@ app.post("/api/loginWithGoogle", async function (req, res, next) {
 
     const longCookieOptions = { ...cookiesOptions, maxAge: LONG_EXPIRY * 1000 };
     res.cookie("TOKEN", token, longCookieOptions);
-    res.send({ username: userEmail });
+    res.send({ username: userEmail, token: token });
   } else {
     // Utente già presente e abilitato
     const LONG_EXPIRY = 31536000;
     const token = createToken(dbUser, LONG_EXPIRY);
     const longCookieOptions = { ...cookiesOptions, maxAge: LONG_EXPIRY * 1000 };
     res.cookie("TOKEN", token, longCookieOptions);
-    res.send({ username: userEmail });
+    res.send({ username: userEmail, token: token });
   }
   await client.close();
 });
@@ -237,10 +255,17 @@ app.post("/api/loginWithGoogle", async function (req, res, next) {
 // CONTROLLO TOKEN (protegge tutte le /api/ successive)
 // =============================================
 app.use("/api/", function (req: any, res, next) {
-  if (!req.cookies || !req.cookies.TOKEN)
+  // Cerchiamo il token nel cookie OPPURE nell'header Authorization (Bearer)
+  let TOKEN = req.cookies.TOKEN;
+  
+  if (!TOKEN && req.headers.authorization) {
+    TOKEN = req.headers.authorization.split(' ')[1]; // Rimuoviamo "Bearer "
+  }
+
+  if (!TOKEN) {
+    console.log("Token mancante per: " + req.originalUrl);
     res.status(403).send("Token mancante");
-  else {
-    const TOKEN = req.cookies.TOKEN;
+  } else {
     jwt.verify(TOKEN, jwtKey, function (err: any, payload: any) {
       if (err) {
         console.log("Token non valido o scaduto");
@@ -366,7 +391,7 @@ app.get("/api/perizie", async function (req: any, res, next) {
     if (req["parsedQuery"]?.operatore) {
       filtro.operatore = {
         $regex: req["parsedQuery"].operatore,
-        $options: "i"
+        $options: "i",
       };
     }
 
@@ -400,11 +425,14 @@ app.get("/api/perizie/:id", async function (req: any, res, next) {
 });
 
 // 8. Creazione nuova perizia (dall'app mobile dell'operatore)
+// Il campo status può essere "bozza" o "inviata" (default: "inviata")
 app.post("/api/perizie", async function (req: any, res, next) {
   const client = new MongoClient(connectionString!);
   try {
     await client.connect();
     const collection = client.db(dbName).collection("perizie");
+
+    const status = req.body.status === "bozza" ? "bozza" : "inviata";
 
     const nuovaPerizia = {
       descrizione: req.body.descrizione || "",
@@ -415,15 +443,85 @@ app.post("/api/perizie", async function (req: any, res, next) {
         lat: req.body.lat || 0,
         lng: req.body.lng || 0,
       },
+      status: status,
     };
 
     const result = await collection.insertOne(nuovaPerizia);
     res.status(200).send({
-      message: "Perizia creata con successo",
+      message: status === "bozza" ? "Bozza salvata con successo" : "Perizia creata con successo",
       insertedId: result.insertedId,
     });
   } catch (err) {
     res.status(500).send("Errore durante la creazione della perizia: " + err);
+  } finally {
+    await client.close();
+  }
+});
+
+// 8b. Bozze dell'operatore corrente (solo le proprie)
+app.get("/api/bozze", async function (req: any, res, next) {
+  const client = new MongoClient(connectionString!);
+  try {
+    await client.connect();
+    const collection = client.db(dbName).collection("perizie");
+    // Restituisce solo le bozze dell'operatore autenticato
+    const bozze = await collection
+      .find({ operatore: req["username"], status: "bozza" })
+      .sort({ dataOra: -1 })
+      .toArray();
+    res.send(bozze);
+  } catch (err) {
+    res.status(500).send("Errore durante la lettura delle bozze: " + err);
+  } finally {
+    await client.close();
+  }
+});
+
+// 8c. Aggiorna bozza (descrizione e/o pubblicazione)
+app.put("/api/perizie/:id", async function (req: any, res, next) {
+  const periziaId = req.params.id;
+  const client = new MongoClient(connectionString!);
+  try {
+    await client.connect();
+    const collection = client.db(dbName).collection("perizie");
+
+    // Verifica che la perizia appartenga all'operatore corrente
+    const perizia = await collection.findOne({ _id: new ObjectId(periziaId) });
+    if (!perizia) {
+      res.status(404).send("Perizia non trovata");
+      return;
+    }
+    if (perizia.operatore !== req["username"]) {
+      res.status(403).send("Non sei il proprietario di questa perizia");
+      return;
+    }
+
+    const updateFields: any = {};
+    if (req.body.descrizione !== undefined) {
+      updateFields.descrizione = req.body.descrizione;
+    }
+    if (req.body.status !== undefined) {
+      updateFields.status = req.body.status === "inviata" ? "inviata" : "bozza";
+    }
+    if (req.body.lat !== undefined) {
+      updateFields["coordinate.lat"] = req.body.lat;
+    }
+    if (req.body.lng !== undefined) {
+      updateFields["coordinate.lng"] = req.body.lng;
+    }
+
+    const result = await collection.updateOne(
+      { _id: new ObjectId(periziaId) },
+      { $set: updateFields }
+    );
+
+    if (result.matchedCount === 0) {
+      res.status(404).send("Perizia non trovata");
+    } else {
+      res.send({ message: "Perizia aggiornata con successo" });
+    }
+  } catch (err) {
+    res.status(500).send("Errore durante l'aggiornamento della perizia: " + err);
   } finally {
     await client.close();
   }
@@ -444,10 +542,10 @@ app.post("/api/perizie/:id/foto", async function (req: any, res, next) {
     // Upload su Cloudinary
     const cloudinaryResponse = await cloudinary.uploader.upload(imgBase64, {
       folder: "perizie",
-      timeout: 30000, // timeout 30 secondi come da specifica
+      timeout: 30000,
     });
 
-    // Aggiorna la perizia nel DB aggiungendo la foto al vettore
+    
     const client = new MongoClient(connectionString!);
     await client.connect();
     const collection = client.db(dbName).collection("perizie");

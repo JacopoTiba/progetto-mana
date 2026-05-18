@@ -61,12 +61,15 @@ export class Mappa implements OnInit, OnDestroy {
   }
 
   async inizializzaMappa() {
-    // Centro di default: Italia
-    const defaultCenter: [number, number] = [12.4964, 41.9028]; // Roma
     const style = this.mapService.neutralStyle;
+    const initialZoom = 12;
 
     try {
-      await this.mapService.drawMap(style, 'mapContainer', defaultCenter, 6);
+      // Otteniamo le coordinate della sede tramite geocode
+      const officePos = await this.mapService.geocode(this.mapService.OFFICE_ADDRESS);
+      const defaultCenter: [number, number] = officePos.center;
+
+      await this.mapService.drawMap(style, 'mapContainer', defaultCenter, initialZoom);
 
       // Aggiungi marker per ogni perizia
       const coordinates: [number, number][] = [];
@@ -83,7 +86,7 @@ export class Mappa implements OnInit, OnDestroy {
                             <small>${perizia.fotografie ? perizia.fotografie.length : 0} foto</small>
                         </div>
                     `;
-          const marker = this.mapService.addMarker(center, popupHTML);
+          const marker = this.mapService.addMarker(center, '', '', popupHTML);
 
           // Click sul marker -> dettaglio perizia
           marker.getElement().addEventListener('click', () => {
