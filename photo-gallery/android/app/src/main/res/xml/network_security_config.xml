@@ -2,7 +2,15 @@
 <network-security-config>
     <base-config cleartextTrafficPermitted="true" />
     <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">192.168.2.193</domain>
+        <!--
+            IP DA CAMBIARE PER ANDROID:
+            deve essere lo stesso IP_DEL_PC usato in:
+            photo-gallery/src/environments/environment.ts
+            photo-gallery/src/environments/environment.prod.ts
+
+            E' l'IPv4 del PC preso da ipconfig, non l'IP del telefono.
+        -->
+        <domain includeSubdomains="true">10.90.159.108</domain>
         <domain includeSubdomains="true">localhost</domain>
     </domain-config>
 </network-security-config>

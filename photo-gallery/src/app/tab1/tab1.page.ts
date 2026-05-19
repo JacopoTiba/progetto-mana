@@ -84,7 +84,7 @@ export class Tab1Page {
           this.errore = 'Username o password non validi';
         } else if (err.status === 0) {
           this.errore =
-            'Server non raggiungibile dall app. Status 0 verso http://192.168.2.193:3000/api/login';
+            'Server non raggiungibile dall app. Controlla IP, porta e firewall.';
         } else {
           this.errore =
             'Errore server ' +
